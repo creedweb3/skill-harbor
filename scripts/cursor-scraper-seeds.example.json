@@ -1,0 +1,5 @@
+[
+  { "owner": "PatrickJS", "repo": "awesome-cursorrules", "kind": "rules" },
+  { "owner": "spencerpauly", "repo": "awesome-cursor-skills", "kind": "skills" },
+  { "owner": "vercel", "repo": "next.js", "kind": "mixed" }
+]

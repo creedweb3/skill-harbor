@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "description": "Top community-recommended Cursor/Claude skills (≈5 per category). Sourced from awesome lists, skills.sh, and production-oriented repos.",
+  "entries": [
+    {"category": "frontend", "rank": 1, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-frontend-design", "notes": "Gold standard; avoids generic AI UI slop"},
+    {"category": "frontend", "rank": 2, "title": "mblode ui-design", "owner": "mblode", "repo": "agent-skills", "path": "skills/ui-design/SKILL.md", "install_folder": "mblode-ui-design"},
+    {"category": "frontend", "rank": 3, "title": "Vercel React Best Practices", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/react-best-practices/SKILL.md", "install_folder": "vercel-react-best-practices"},
+    {"category": "frontend", "rank": 4, "title": "jeffallan react-expert", "owner": "jeffallan", "repo": "claude-skills", "path": "skills/react-expert/SKILL.md", "install_folder": "jeffallan-react-expert", "optional": true},
+    {"category": "frontend", "rank": 5, "title": "pbakaus impeccable", "owner": "pbakaus", "repo": "impeccable", "path": ".cursor/skills/impeccable/SKILL.md", "install_folder": "impeccable"},
+
+    {"category": "backend", "rank": 1, "title": "davila7 senior-backend", "owner": "davila7", "repo": "claude-code-templates", "path": "cli-tool/components/skills/development/senior-backend/SKILL.md", "install_folder": "senior-backend"},
+    {"category": "backend", "rank": 2, "title": "mcollina fastify best practices", "owner": "mcollina", "repo": "skills", "path": "skills/fastify/SKILL.md", "install_folder": "fastify-best-practices"},
+    {"category": "backend", "rank": 3, "title": "mcollina node best practices", "owner": "mcollina", "repo": "skills", "path": "skills/node/SKILL.md", "install_folder": "node-best-practices"},
+    {"category": "backend", "rank": 4, "title": "Supabase Postgres best practices", "owner": "supabase", "repo": "agent-skills", "path": "skills/supabase-postgres-best-practices/SKILL.md", "install_folder": "supabase-postgres-best-practices", "optional": true},
+    {"category": "backend", "rank": 5, "title": "Supabase platform skill", "owner": "supabase", "repo": "agent-skills", "path": "skills/supabase/SKILL.md", "install_folder": "supabase"},
+
+    {"category": "fullstack", "rank": 1, "title": "davila7 senior-architect", "owner": "davila7", "repo": "claude-code-templates", "path": "cli-tool/components/skills/development/senior-architect/SKILL.md", "install_folder": "senior-architect", "optional": true},
+    {"category": "fullstack", "rank": 2, "title": "Vercel Next.js best practices", "owner": "vercel-labs", "repo": "next-skills", "path": "skills/next-best-practices/SKILL.md", "install_folder": "next-best-practices", "optional": true},
+    {"category": "fullstack", "rank": 3, "title": "davila7 senior-backend", "owner": "davila7", "repo": "claude-code-templates", "path": "cli-tool/components/skills/development/senior-backend/SKILL.md", "install_folder": "senior-backend-fullstack"},
+    {"category": "fullstack", "rank": 4, "title": "obra superpowers using-superpowers", "owner": "obra", "repo": "superpowers", "path": "skills/using-superpowers/SKILL.md", "install_folder": "using-superpowers"},
+    {"category": "fullstack", "rank": 5, "title": "Anthropic skill-creator", "owner": "anthropics", "repo": "skills", "path": "skills/skill-creator/SKILL.md", "install_folder": "skill-creator", "optional": true},
+
+    {"category": "seo", "rank": 1, "title": "Agentic SEO Skill", "owner": "Bhanunamikaze", "repo": "Agentic-SEO-Skill", "path": "SKILL.md", "install_folder": "agentic-seo"},
+    {"category": "seo", "rank": 2, "title": "Sanity SEO AEO best practices", "owner": "sanity-io", "repo": "agent-toolkit", "path": "skills/seo-aeo-best-practices/SKILL.md", "install_folder": "seo-aeo-best-practices"},
+    {"category": "seo", "rank": 3, "title": "coreyhaines31 ai-seo", "owner": "coreyhaines31", "repo": "ai-seo", "path": "SKILL.md", "install_folder": "ai-seo", "optional": true},
+    {"category": "seo", "rank": 4, "title": "AgriciDaniel claude-seo", "owner": "AgriciDaniel", "repo": "claude-seo", "path": "SKILL.md", "install_folder": "claude-seo", "optional": true},
+    {"category": "seo", "rank": 5, "title": "best-aeo-skill", "owner": "metawhisp", "repo": "best-aeo-skill", "path": "SKILL.md", "install_folder": "best-aeo-skill"},
+
+    {"category": "geo-aeo", "rank": 1, "title": "Sanity SEO AEO best practices", "owner": "sanity-io", "repo": "agent-toolkit", "path": "skills/seo-aeo-best-practices/SKILL.md", "install_folder": "seo-aeo-best-practices"},
+    {"category": "geo-aeo", "rank": 2, "title": "Agentic SEO Skill", "owner": "Bhanunamikaze", "repo": "Agentic-SEO-Skill", "path": "SKILL.md", "install_folder": "agentic-seo-geo"},
+    {"category": "geo-aeo", "rank": 3, "title": "best-aeo-skill", "owner": "metawhisp", "repo": "best-aeo-skill", "path": "SKILL.md", "install_folder": "best-aeo-skill"},
+    {"category": "geo-aeo", "rank": 4, "title": "coreyhaines31 marketingskills ai-seo", "owner": "coreyhaines31", "repo": "marketingskills", "path": "skills/ai-seo/SKILL.md", "install_folder": "marketing-ai-seo", "optional": true},
+    {"category": "geo-aeo", "rank": 5, "title": "google-labs design-md", "owner": "google-labs-code", "repo": "stitch-skills", "path": "skills/design-md/SKILL.md", "install_folder": "design-md", "optional": true},
+
+    {"category": "gsc", "rank": 1, "title": "Agentic SEO (technical + CWV)", "owner": "Bhanunamikaze", "repo": "Agentic-SEO-Skill", "path": "SKILL.md", "install_folder": "agentic-seo-gsc"},
+    {"category": "gsc", "rank": 2, "title": "Vercel React performance", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/react-best-practices/SKILL.md", "install_folder": "vercel-react-gsc"},
+    {"category": "gsc", "rank": 3, "title": "Sanity technical SEO", "owner": "sanity-io", "repo": "agent-toolkit", "path": "skills/seo-aeo-best-practices/SKILL.md", "install_folder": "sanity-technical-seo"},
+    {"category": "gsc", "rank": 4, "title": "mblode ui-audit", "owner": "mblode", "repo": "agent-skills", "path": "skills/ui-audit/SKILL.md", "install_folder": "mblode-ui-audit"},
+    {"category": "gsc", "rank": 5, "title": "Vercel Web Design Guidelines", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/web-design-guidelines/SKILL.md", "install_folder": "web-design-guidelines", "optional": true},
+
+    {"category": "database", "rank": 1, "title": "Supabase Postgres best practices", "owner": "supabase", "repo": "agent-skills", "path": "skills/supabase-postgres-best-practices/SKILL.md", "install_folder": "supabase-postgres-best-practices", "optional": true},
+    {"category": "database", "rank": 2, "title": "Supabase platform", "owner": "supabase", "repo": "agent-skills", "path": "skills/supabase/SKILL.md", "install_folder": "supabase-db"},
+    {"category": "database", "rank": 3, "title": "davila7 senior-backend", "owner": "davila7", "repo": "claude-code-templates", "path": "cli-tool/components/skills/development/senior-backend/SKILL.md", "install_folder": "senior-backend-db"},
+    {"category": "database", "rank": 4, "title": "Prisma skill", "owner": "prisma", "repo": "skills", "path": "skills/prisma/SKILL.md", "install_folder": "prisma", "optional": true},
+    {"category": "database", "rank": 5, "title": "mcollina node (DB patterns)", "owner": "mcollina", "repo": "skills", "path": "skills/node/SKILL.md", "install_folder": "node-db-patterns"},
+
+    {"category": "claude", "rank": 1, "title": "Anthropic skill-creator", "owner": "anthropics", "repo": "skills", "path": "skills/skill-creator/SKILL.md", "install_folder": "skill-creator", "optional": true},
+    {"category": "claude", "rank": 2, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-frontend-design"},
+    {"category": "claude", "rank": 3, "title": "obra writing-skills", "owner": "obra", "repo": "superpowers", "path": "skills/writing-skills/SKILL.md", "install_folder": "writing-skills"},
+    {"category": "claude", "rank": 4, "title": "obra using-superpowers", "owner": "obra", "repo": "superpowers", "path": "skills/using-superpowers/SKILL.md", "install_folder": "using-superpowers-claude"},
+    {"category": "claude", "rank": 5, "title": "Anthropic document skills", "owner": "anthropics", "repo": "skills", "path": "skills/pdf/SKILL.md", "install_folder": "anthropics-pdf", "optional": true},
+
+    {"category": "cursor", "rank": 1, "title": "mblode agent-skills-creator", "owner": "mblode", "repo": "agent-skills", "path": "skills/agent-skills-creator/SKILL.md", "install_folder": "agent-skills-creator", "optional": true},
+    {"category": "cursor", "rank": 2, "title": "mblode agents-md hygiene", "owner": "mblode", "repo": "agent-skills", "path": "skills/agents-md/SKILL.md", "install_folder": "agents-md", "optional": true},
+    {"category": "cursor", "rank": 3, "title": "jeffallan claude-skills init", "owner": "jeffallan", "repo": "claude-skills", "path": "skills/init/SKILL.md", "install_folder": "jeffallan-init", "optional": true},
+    {"category": "cursor", "rank": 4, "title": "Vercel find-skills", "owner": "vercel-labs", "repo": "skills", "path": "skills/find-skills/SKILL.md", "install_folder": "find-skills"},
+    {"category": "cursor", "rank": 5, "title": "mcollina init AGENTS.md", "owner": "mcollina", "repo": "skills", "path": "skills/init/SKILL.md", "install_folder": "init-agents-md"},
+
+    {"category": "orchestrator", "rank": 1, "title": "obra subagent-driven-development", "owner": "obra", "repo": "superpowers", "path": "skills/subagent-driven-development/SKILL.md", "install_folder": "subagent-driven-development"},
+    {"category": "orchestrator", "rank": 2, "title": "obra dispatching-parallel-agents", "owner": "obra", "repo": "superpowers", "path": "skills/dispatching-parallel-agents/SKILL.md", "install_folder": "dispatching-parallel-agents"},
+    {"category": "orchestrator", "rank": 3, "title": "Agentic SEO orchestrator", "owner": "Bhanunamikaze", "repo": "Agentic-SEO-Skill", "path": "SKILL.md", "install_folder": "agentic-seo-orchestrator"},
+    {"category": "orchestrator", "rank": 4, "title": "obra writing-plans", "owner": "obra", "repo": "superpowers", "path": "skills/writing-plans/SKILL.md", "install_folder": "writing-plans"},
+    {"category": "orchestrator", "rank": 5, "title": "obra executing-plans", "owner": "obra", "repo": "superpowers", "path": "skills/executing-plans/SKILL.md", "install_folder": "executing-plans"},
+
+    {"category": "ui", "rank": 1, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-frontend-design"},
+    {"category": "ui", "rank": 2, "title": "mblode ui-design", "owner": "mblode", "repo": "agent-skills", "path": "skills/ui-design/SKILL.md", "install_folder": "mblode-ui-design"},
+    {"category": "ui", "rank": 3, "title": "nextlevelbuilder ui-ux-pro-max", "owner": "nextlevelbuilder", "repo": "ui-ux-pro-max-skill", "path": "SKILL.md", "install_folder": "ui-ux-pro-max", "optional": true},
+    {"category": "ui", "rank": 4, "title": "Vercel Web Design Guidelines", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/web-design-guidelines/SKILL.md", "install_folder": "web-design-guidelines", "optional": true},
+    {"category": "ui", "rank": 5, "title": "pbakaus impeccable", "owner": "pbakaus", "repo": "impeccable", "path": ".cursor/skills/impeccable/SKILL.md", "install_folder": "impeccable"},
+
+    {"category": "ux", "rank": 1, "title": "mblode ux-audit", "owner": "mblode", "repo": "agent-skills", "path": "skills/ux-audit/SKILL.md", "install_folder": "mblode-ux-audit", "optional": true},
+    {"category": "ux", "rank": 2, "title": "mblode ui-audit", "owner": "mblode", "repo": "agent-skills", "path": "skills/ui-audit/SKILL.md", "install_folder": "mblode-ui-audit-ux"},
+    {"category": "ux", "rank": 3, "title": "nextlevelbuilder ui-ux-pro-max", "owner": "nextlevelbuilder", "repo": "ui-ux-pro-max-skill", "path": "SKILL.md", "install_folder": "ui-ux-pro-max-ux", "optional": true},
+    {"category": "ux", "rank": 4, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-frontend-ux"},
+    {"category": "ux", "rank": 5, "title": "pbakaus impeccable critique flow", "owner": "pbakaus", "repo": "impeccable", "path": ".cursor/skills/impeccable/SKILL.md", "install_folder": "impeccable-ux"},
+
+    {"category": "mobile-responsive", "rank": 1, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-frontend-mobile"},
+    {"category": "mobile-responsive", "rank": 2, "title": "Vercel React best practices", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/react-best-practices/SKILL.md", "install_folder": "vercel-react-mobile"},
+    {"category": "mobile-responsive", "rank": 3, "title": "Vercel Next best practices", "owner": "vercel-labs", "repo": "next-skills", "path": "skills/next-best-practices/SKILL.md", "install_folder": "next-mobile", "optional": true},
+    {"category": "mobile-responsive", "rank": 4, "title": "pbakaus impeccable adapt", "owner": "pbakaus", "repo": "impeccable", "path": ".cursor/skills/impeccable/SKILL.md", "install_folder": "impeccable-mobile"},
+    {"category": "mobile-responsive", "rank": 5, "title": "mblode ui-audit", "owner": "mblode", "repo": "agent-skills", "path": "skills/ui-audit/SKILL.md", "install_folder": "mblode-mobile-audit"},
+
+    {"category": "mobile-native", "rank": 1, "title": "Expo native UI", "owner": "expo", "repo": "skills", "path": "skills/native-ui/SKILL.md", "install_folder": "expo-native-ui", "optional": true},
+    {"category": "mobile-native", "rank": 2, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-pwa"},
+    {"category": "mobile-native", "rank": 3, "title": "Vercel Next best practices", "owner": "vercel-labs", "repo": "next-skills", "path": "skills/next-best-practices/SKILL.md", "install_folder": "next-pwa", "optional": true},
+    {"category": "mobile-native", "rank": 4, "title": "pbakaus impeccable", "owner": "pbakaus", "repo": "impeccable", "path": ".cursor/skills/impeccable/SKILL.md", "install_folder": "impeccable-pwa"},
+    {"category": "mobile-native", "rank": 5, "title": "Progressive Web App skill", "owner": "SecondSky", "repo": "agent-skills", "path": "skills/pwa/SKILL.md", "install_folder": "pwa", "optional": true},
+
+    {"category": "performance", "rank": 1, "title": "Vercel React best practices", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/react-best-practices/SKILL.md", "install_folder": "vercel-react-performance"},
+    {"category": "performance", "rank": 2, "title": "davila7 web-performance-optimization", "owner": "davila7", "repo": "claude-code-templates", "path": "cli-tool/components/skills/development/web-performance-optimization/SKILL.md", "install_folder": "web-performance-optimization", "optional": true},
+    {"category": "performance", "rank": 3, "title": "Vercel Web Design Guidelines", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/web-design-guidelines/SKILL.md", "install_folder": "web-design-guidelines-perf", "optional": true},
+    {"category": "performance", "rank": 4, "title": "Supabase Postgres performance", "owner": "supabase", "repo": "agent-skills", "path": "skills/supabase-postgres-best-practices/SKILL.md", "install_folder": "supabase-postgres-perf", "optional": true},
+    {"category": "performance", "rank": 5, "title": "mcollina node performance", "owner": "mcollina", "repo": "skills", "path": "skills/node/SKILL.md", "install_folder": "node-performance"},
+
+    {"category": "intelligence", "rank": 1, "title": "Anthropic skill-creator", "owner": "anthropics", "repo": "skills", "path": "skills/skill-creator/SKILL.md", "install_folder": "skill-creator", "optional": true},
+    {"category": "intelligence", "rank": 2, "title": "obra brainstorming", "owner": "obra", "repo": "superpowers", "path": "skills/brainstorming/SKILL.md", "install_folder": "brainstorming"},
+    {"category": "intelligence", "rank": 3, "title": "Vercel find-skills", "owner": "vercel-labs", "repo": "skills", "path": "skills/find-skills/SKILL.md", "install_folder": "find-skills-intel"},
+    {"category": "intelligence", "rank": 4, "title": "Agentic SEO", "owner": "Bhanunamikaze", "repo": "Agentic-SEO-Skill", "path": "SKILL.md", "install_folder": "agentic-seo-intel"},
+    {"category": "intelligence", "rank": 5, "title": "obra systematic-debugging", "owner": "obra", "repo": "superpowers", "path": "skills/systematic-debugging/SKILL.md", "install_folder": "systematic-debugging"},
+
+    {"category": "design", "rank": 1, "title": "Anthropic frontend-design", "owner": "anthropics", "repo": "skills", "path": "skills/frontend-design/SKILL.md", "install_folder": "anthropics-design"},
+    {"category": "design", "rank": 2, "title": "pbakaus impeccable", "owner": "pbakaus", "repo": "impeccable", "path": ".cursor/skills/impeccable/SKILL.md", "install_folder": "impeccable-design"},
+    {"category": "design", "rank": 3, "title": "mblode ui-design", "owner": "mblode", "repo": "agent-skills", "path": "skills/ui-design/SKILL.md", "install_folder": "mblode-design"},
+    {"category": "design", "rank": 4, "title": "google-labs design-md", "owner": "google-labs-code", "repo": "stitch-skills", "path": "skills/design-md/SKILL.md", "install_folder": "design-md", "optional": true},
+    {"category": "design", "rank": 5, "title": "Vercel Web Design Guidelines", "owner": "vercel-labs", "repo": "agent-skills", "path": "skills/web-design-guidelines/SKILL.md", "install_folder": "web-design-guidelines-design", "optional": true}
+  ]
+}
