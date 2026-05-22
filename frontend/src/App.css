@@ -925,41 +925,6 @@ input[type="checkbox"] {
   font-variant-numeric: tabular-nums;
 }
 
-/* Empty state */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 3.5rem 2rem;
-  background: var(--surface);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
-  max-width: 420px;
-  margin: 2rem auto;
-}
-
-.empty-title {
-  margin: 0 0 0.5rem;
-  font-family: var(--font-serif);
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.empty-state .steps {
-  text-align: left;
-  margin: 0 0 1.25rem;
-  padding-left: 1.25rem;
-  color: var(--muted);
-  font-size: 0.875rem;
-  line-height: 1.6;
-}
-
-.empty-state .steps strong {
-  color: var(--text-secondary);
-}
-
 /* Marketplace spotlight */
 .spotlight {
   margin: 0 1.75rem;
@@ -1130,6 +1095,41 @@ input[type="checkbox"] {
   padding: 0.4rem 0;
 }
 
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3.5rem 2rem;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  max-width: 420px;
+  margin: 2rem auto;
+}
+
+.empty-title {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.empty-state .steps {
+  text-align: left;
+  margin: 0 0 1.25rem;
+  padding-left: 1.25rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.empty-state .steps strong {
+  color: var(--text-secondary);
+}
+
 /* Activity log */
 .activity-log {
   flex-shrink: 0;
@@ -1198,7 +1198,9 @@ input[type="checkbox"] {
 .catalog::-webkit-scrollbar,
 .filter-drawer-body::-webkit-scrollbar,
 .activity-log-body::-webkit-scrollbar,
-.installed-list::-webkit-scrollbar {
+.installed-list::-webkit-scrollbar,
+.spotlight-body::-webkit-scrollbar,
+.installed-sections::-webkit-scrollbar {
   width: 6px;
 }
 
@@ -1206,7 +1208,9 @@ input[type="checkbox"] {
 .catalog::-webkit-scrollbar-thumb,
 .filter-drawer-body::-webkit-scrollbar-thumb,
 .activity-log-body::-webkit-scrollbar-thumb,
-.installed-list::-webkit-scrollbar-thumb {
+.installed-list::-webkit-scrollbar-thumb,
+.spotlight-body::-webkit-scrollbar-thumb,
+.installed-sections::-webkit-scrollbar-thumb {
   background: var(--surface-raised);
   border-radius: var(--radius-full);
 }

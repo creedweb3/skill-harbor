@@ -12,8 +12,8 @@ export function Brand() {
         </svg>
       </div>
       <div>
-        <h1>SkillHarbor</h1>
-        <p>Marketplace for skills, rules, commands & subagents</p>
+        <h1>Skill Harbor</h1>
+        <p>Marketplace for Cursor skills, rules, commands & subagents</p>
       </div>
     </header>
   );

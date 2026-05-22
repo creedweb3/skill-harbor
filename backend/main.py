@@ -1,5 +1,5 @@
 """
-SkillHarbor — local API for browsing and installing Cursor agent assets.
+Skill Harbor — marketplace API for Cursor skills, rules, commands, and subagents.
 
 Run: uvicorn main:app --reload --port 8765
 """
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from studio import config, cursor_paths, export_import, leaderboards, scraper_bridge
 
 app = FastAPI(
-    title="SkillHarbor",
+    title="Skill Harbor",
     description="Marketplace API for Cursor skills, rules, commands, and subagents",
     version="0.2.0",
 )

@@ -6,7 +6,6 @@ from typing import Any
 
 from studio import scraper_bridge, taxonomy
 
-# Legacy curated manifest categories → marketplace profession slug
 CURATED_CATEGORY_TO_DOMAIN: dict[str, str] = {
     "frontend": "web-development",
     "backend": "backend-apis",
@@ -82,9 +81,10 @@ def build_leaderboards() -> dict[str, Any]:
         )
     )[:16]
 
-    # Per profession group (Build & ship, Grow & design, Specialist)
     by_profession: list[dict[str, Any]] = []
-    domain_labels = {slug: slug.replace("-", " ").title() for slug in taxonomy.all_domain_categories()}
+    domain_labels = {
+        slug: slug.replace("-", " ").title() for slug in taxonomy.all_domain_categories()
+    }
 
     for group in taxonomy.CATEGORY_GROUPS:
         group_domains = set(group["categories"])
@@ -98,19 +98,12 @@ def build_leaderboards() -> dict[str, Any]:
         )[:8]
         if group_rows:
             by_profession.append(
-                {
-                    "id": group["id"],
-                    "label": group["label"],
-                    "items": group_rows,
-                }
+                {"id": group["id"], "label": group["label"], "items": group_rows}
             )
 
-    # Per-domain top 5 (profession rankings)
     by_domain: list[dict[str, Any]] = []
     for domain in taxonomy.all_domain_categories():
-        domain_rows = [
-            r for r in rows if r["domain"] == domain and r["rank"] <= 5
-        ]
+        domain_rows = [r for r in rows if r["domain"] == domain and r["rank"] <= 5]
         domain_rows = _dedupe_by_install(
             sorted(domain_rows, key=lambda r: (r["rank"], r["title"].lower()))
         )[:5]

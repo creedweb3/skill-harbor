@@ -1,1 +1,1 @@
-"""SkillHarbor backend."""
+"""Skill Harbor backend."""

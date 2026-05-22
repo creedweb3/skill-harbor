@@ -2,21 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
-STUDIO_DIR = Path.home() / ".skill-harbor"
-LEGACY_STUDIO_DIR = Path.home() / ".cursor-skills-studio"
+STUDIO_DIR = Path.home() / ".cursor-skills-studio"
+CONFIG_DIR = STUDIO_DIR
 CONFIG_PATH = STUDIO_DIR / "config.json"
-LEGACY_CONFIG_PATH = LEGACY_STUDIO_DIR / "config.json"
-
-
-def _migrate_legacy_config() -> None:
-    if CONFIG_PATH.is_file() or not LEGACY_CONFIG_PATH.is_file():
-        return
-    STUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(LEGACY_CONFIG_PATH, CONFIG_PATH)
 
 
 def default_project_dir() -> Path:
@@ -24,7 +15,6 @@ def default_project_dir() -> Path:
 
 
 def load_config() -> dict[str, Any]:
-    _migrate_legacy_config()
     if not CONFIG_PATH.is_file():
         return {}
     try:

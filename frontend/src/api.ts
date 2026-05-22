@@ -72,6 +72,29 @@ export type CategoriesResponse = {
   curated_help: string;
 };
 
+export type LeaderboardEntry = {
+  id: string;
+  title: string;
+  install_folder: string;
+  category: string;
+  domain: string;
+  rank: number;
+  owner: string;
+  repo: string;
+  path: string;
+  source_repo: string;
+  optional?: boolean;
+  notes?: string;
+};
+
+export type LeaderboardsResponse = {
+  top_picks: LeaderboardEntry[];
+  trending: LeaderboardEntry[];
+  by_profession: { id: string; label: string; items: LeaderboardEntry[] }[];
+  by_domain: { domain: string; label: string; items: LeaderboardEntry[] }[];
+  total_curated: number;
+};
+
 function parseApiError(text: string, status: number, statusText: string): string {
   try {
     const data = JSON.parse(text) as { detail?: string };
@@ -84,7 +107,7 @@ function parseApiError(text: string, status: number, statusText: string): string
     return "GitHub rate limit exceeded. Add a token in Settings and try again.";
   }
   if (status >= 500 || statusText === "Internal Server Error") {
-    return "Backend unavailable. Run npm run dev from skill-harbor (API on port 8765).";
+    return "Backend unavailable. Run npm run dev from cursor-skills-studio (API on port 8765).";
   }
   return statusText || `Request failed (${status})`;
 }
@@ -119,29 +142,6 @@ export const patchSettings = (body: {
 export const getConnection = () => api<ConnectionInfo>("/api/connection");
 
 export const getCategories = () => api<CategoriesResponse>("/api/categories");
-
-export type LeaderboardEntry = {
-  id: string;
-  title: string;
-  install_folder: string;
-  category: string;
-  domain: string;
-  rank: number;
-  owner: string;
-  repo: string;
-  path: string;
-  source_repo: string;
-  optional?: boolean;
-  notes?: string;
-};
-
-export type LeaderboardsResponse = {
-  top_picks: LeaderboardEntry[];
-  trending: LeaderboardEntry[];
-  by_profession: { id: string; label: string; items: LeaderboardEntry[] }[];
-  by_domain: { domain: string; label: string; items: LeaderboardEntry[] }[];
-  total_curated: number;
-};
 
 export const getLeaderboards = () => api<LeaderboardsResponse>("/api/leaderboards");
 
