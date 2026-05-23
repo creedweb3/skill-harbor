@@ -192,7 +192,54 @@ DOMAIN_CATEGORIES: dict[str, list[str]] = {
     ],
 }
 
-# UI grouping for filters
+# Human-readable labels for Discovery (flat profession list — no nested groups)
+DOMAIN_LABELS: dict[str, str] = {
+    "agent-ai": "AI & Agents",
+    "web-development": "Web Development",
+    "full-stack": "Full Stack",
+    "backend-apis": "Backend & APIs",
+    "mobile-apps": "Mobile Apps",
+    "database": "Database",
+    "devops-infra": "DevOps & Cloud",
+    "performance": "Performance",
+    "marketing-seo": "Marketing & SEO",
+    "product-design": "Product & UI Design",
+    "ecommerce": "E-commerce",
+    "writing-docs": "Writing & Docs",
+    "data-ml": "Data & Machine Learning",
+    "crypto-web3": "Crypto & Web3",
+    "game-dev": "Game Development",
+    "finance": "Finance & Fintech",
+    "legal-compliance": "Legal & Compliance",
+    "healthcare": "Healthcare",
+}
+
+# Ordered professions shown on the Discovery page (after Trending + For You)
+DISCOVERY_PROFESSIONS: list[dict[str, str]] = [
+    {"domain": d, "label": DOMAIN_LABELS[d]}
+    for d in [
+        "agent-ai",
+        "web-development",
+        "full-stack",
+        "backend-apis",
+        "mobile-apps",
+        "database",
+        "devops-infra",
+        "performance",
+        "marketing-seo",
+        "product-design",
+        "ecommerce",
+        "writing-docs",
+        "data-ml",
+        "crypto-web3",
+        "game-dev",
+        "finance",
+        "legal-compliance",
+        "healthcare",
+    ]
+]
+
+# UI grouping for Custom Search filters only
 CATEGORY_GROUPS: list[dict[str, Any]] = [
     {
         "id": "build",

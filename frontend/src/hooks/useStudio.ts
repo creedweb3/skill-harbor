@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Asset,
   CategoryGroup,
@@ -6,12 +6,13 @@ import {
   getCategories,
   getConnection,
   getExport,
+  getCatalog,
   getLeaderboards,
   getSettings,
   patchSettings,
   postImport,
   postInstall,
-  postPreview,
+  postSync,
   removeAsset,
   type LeaderboardEntry,
   type LeaderboardsResponse,
@@ -30,11 +31,18 @@ export type LogKind = "info" | "ok" | "err";
 
 export type { InstalledRow };
 
+export type TrendPeriod = "day" | "week" | "month" | "year" | "all";
+
 export type LeaderboardTab = "trending" | "top_picks" | "profession" | "domain";
+
+export type DiscoverMode = "discovery" | "search";
 
 export function useStudio() {
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
   const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>([]);
+  const [discoveryProfessions, setDiscoveryProfessions] = useState<
+    import("../api").DiscoveryProfession[]
+  >([]);
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [curatedHelp, setCuratedHelp] = useState("");
   const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(DEFAULT_CATS));
@@ -57,6 +65,15 @@ export function useStudio() {
   const [logOpen, setLogOpen] = useState(true);
   const [leaderboards, setLeaderboards] = useState<LeaderboardsResponse | null>(null);
   const [leaderboardTab, setLeaderboardTab] = useState<LeaderboardTab>("trending");
+  const [backendReady, setBackendReady] = useState(false);
+  const [discoverMode, setDiscoverMode] = useState<DiscoverMode>("discovery");
+  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("week");
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [dbStats, setDbStats] = useState<{
+    asset_count: number;
+    synced_content_count: number;
+    last_synced_at?: string;
+  } | null>(null);
 
   const pushLog = useCallback((line: string, kind: LogKind = "info") => {
     const prefix = kind === "ok" ? "✓ " : kind === "err" ? "✗ " : "";
@@ -64,29 +81,79 @@ export function useStudio() {
     setLogOpen(true);
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const [settings, conn, cats, boards] = await Promise.all([
-        getSettings(),
-        getConnection(),
-        getCategories(),
-        getLeaderboards(),
-      ]);
-      setProjectDir(settings.project_dir);
-      setTokenSet(settings.github_token_set);
-      setConnection(conn);
-      setAllCategories(cats.categories);
-      setCategoryGroups(cats.groups);
-      setCuratedHelp(cats.curated_help);
-      setLeaderboards(boards);
-    } catch (e) {
-      pushLog(String(e), "err");
-    }
-  }, [pushLog]);
+  const refresh = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      try {
+        const [settings, conn, cats, boards] = await Promise.all([
+          getSettings(),
+          getConnection(),
+          getCategories(),
+          getLeaderboards(),
+        ]);
+        setProjectDir(settings.project_dir);
+        setTokenSet(settings.github_token_set);
+        setDbStats({
+          asset_count: settings.asset_count,
+          synced_content_count: settings.synced_content_count,
+          last_synced_at: settings.last_synced_at,
+        });
+        setConnection(conn);
+        setAllCategories(cats.categories);
+        setCategoryGroups(cats.groups);
+      setDiscoveryProfessions(cats.discovery_professions ?? []);
+        setCuratedHelp(cats.curated_help);
+        setLeaderboards(boards);
+        setBackendReady(true);
+      } catch (e) {
+        setBackendReady(false);
+        if (!opts?.silent) pushLog(String(e), "err");
+      }
+    },
+    [pushLog]
+  );
+
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    const delays = [0, 800, 1600, 3000, 5000];
+
+    (async () => {
+      for (let i = 0; i < delays.length; i++) {
+        if (cancelled) return;
+        if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
+        if (cancelled) return;
+        const healthy = await fetch("/api/health")
+          .then((r) => r.ok)
+          .catch(() => false);
+        if (!healthy) continue;
+        await refreshRef.current({ silent: i < delays.length - 1 });
+        if (!cancelled && i > 0) pushLog("Connected to API", "ok");
+        if (!cancelled) {
+          try {
+            const cat = await getCatalog({ limit: 500 });
+            setAssets(cat.assets);
+          } catch {
+            /* catalog loads on next refresh */
+          }
+        }
+        return;
+      }
+      if (!cancelled) {
+        pushLog(
+          "Backend unavailable. Run npm run dev in the skill-harbor folder, then click Refresh.",
+          "err"
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only: retry until API is up (Vite often starts before uvicorn)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleCat = (cat: string) => {
     setSelectedCats((prev) => {
@@ -100,36 +167,39 @@ export function useStudio() {
   const selectAllCats = () => setSelectedCats(new Set(allCategories));
   const clearCats = () => setSelectedCats(new Set());
 
-  const fetchCatalog = async () => {
-    setBusy(true);
-    pushLog("Fetching from GitHub…");
+  const loadCatalog = useCallback(async () => {
     try {
-      const result = await postPreview({
-        categories: [...selectedCats],
-        top_per_category: topPerCategory,
-        curated_only: !includeDiscovery,
-        include_discovery: includeDiscovery,
-      });
+      const result = await getCatalog({ limit: 500 });
       setAssets(result.assets);
-      const selectable = result.assets.filter(
-        (a) => a.install_status?.status === "none" || force
-      );
-      setSelectedIds(new Set(selectable.map((a) => a.id)));
-      if (result.assets.length === 0) {
-        pushLog("No items loaded — check log or add a GitHub token for discovery.", "err");
-      } else {
-        pushLog(
-          `Loaded ${result.assets.length} items from ${result.repos_scanned.length} repos`,
-          "ok"
-        );
-      }
-      result.errors.slice(0, 6).forEach((e) => pushLog(e, "err"));
+      setDbStats({
+        asset_count: result.stats.total_assets,
+        synced_content_count: result.stats.synced_content,
+        last_synced_at: dbStats?.last_synced_at,
+      });
+      return result;
+    } catch (e) {
+      pushLog(String(e), "err");
+      return null;
+    }
+  }, [pushLog, dbStats?.last_synced_at]);
+
+  const syncRegistry = async (force = false) => {
+    setBusy(true);
+    pushLog("Syncing file content from GitHub (no token)…");
+    try {
+      const result = await postSync(force);
+      pushLog(`Synced ${result.updated} assets`, "ok");
+      result.errors.slice(0, 5).forEach((e) => pushLog(e, "err"));
+      await loadCatalog();
+      await refresh({ silent: true });
     } catch (e) {
       pushLog(String(e), "err");
     } finally {
       setBusy(false);
     }
   };
+
+  const fetchCatalog = syncRegistry;
 
   const runInstall = async () => {
     const picked = assets.filter((a) => selectedIds.has(a.id));
@@ -151,7 +221,7 @@ export function useStudio() {
         "ok"
       );
       result.errors.forEach((e) => pushLog(e, "err"));
-      await fetchCatalog();
+      await loadCatalog();
       await refresh();
     } catch (e) {
       pushLog(String(e), "err");
@@ -213,7 +283,7 @@ export function useStudio() {
       await removeAsset(assetType, name, scope);
       pushLog(`Removed ${name} (${scope})`, "ok");
       await refresh();
-      if (assets.length) await fetchCatalog();
+      await loadCatalog();
     } catch (e) {
       pushLog(String(e), "err");
     }
@@ -264,7 +334,7 @@ export function useStudio() {
           "ok"
         );
         await refresh();
-        await fetchCatalog();
+        await loadCatalog();
       } catch (e) {
         pushLog(String(e), "err");
       } finally {
@@ -360,6 +430,7 @@ export function useStudio() {
   return {
     connection,
     categoryGroups,
+    discoveryProfessions,
     curatedHelp,
     selectedCats,
     assets,
@@ -391,6 +462,9 @@ export function useStudio() {
     setSidebarTab,
     logOpen,
     setLogOpen,
+    backendReady,
+    discoverMode,
+    setDiscoverMode,
     leaderboards,
     leaderboardTab,
     setLeaderboardTab,
@@ -411,6 +485,15 @@ export function useStudio() {
     runExport,
     runImport,
     refresh,
+    trendPeriod,
+    setTrendPeriod,
+    selectedAssetId,
+    setSelectedAssetId,
+    dbStats,
+    syncRegistry,
+    loadCatalog,
+    pushLog,
+    setBusy,
     toggleSelectAllVisible,
     deselectAll,
     toggleRow,

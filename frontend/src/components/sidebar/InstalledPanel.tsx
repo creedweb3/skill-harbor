@@ -3,19 +3,10 @@ import type { Studio } from "../../hooks/useStudio";
 import { groupInstalledItems } from "../../lib/installedGroups";
 import { Button } from "../ui/Button";
 
-type Props = Pick<
-  Studio,
-  "installedItems" | "connection" | "busy" | "runExport" | "runImport" | "onRemove"
->;
+type Props = { studio: Studio };
 
-export function InstalledPanel({
-  installedItems,
-  connection,
-  busy,
-  runExport,
-  runImport,
-  onRemove,
-}: Props) {
+export function InstalledPanel({ studio }: Props) {
+  const { installedItems, connection, busy, runExport, runImport, onRemove } = studio;
   const sections = useMemo(
     () => groupInstalledItems(installedItems, connection),
     [installedItems, connection]

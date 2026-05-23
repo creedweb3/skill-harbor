@@ -32,7 +32,7 @@ export function Sidebar({ studio }: Props) {
           ) : null}
         </button>
       </nav>
-      {sidebarTab === "setup" ? <SetupPanel {...studio} /> : <InstalledPanel {...studio} />}
+      {sidebarTab === "setup" ? <SetupPanel studio={studio} /> : <InstalledPanel studio={studio} />}
     </aside>
   );
 }

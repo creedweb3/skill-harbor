@@ -18,12 +18,14 @@ export type Asset = {
   score: number;
   stars: number;
   content_preview: string;
+  content?: string;
   install_name: string;
   raw_url: string;
   curated: boolean;
   curated_rank: number;
   curated_title: string;
   install_status: InstallStatus;
+  repo_pushed_at?: string;
 };
 
 export type CategoryGroup = {
@@ -69,7 +71,14 @@ export type ExportBundle = {
 export type CategoriesResponse = {
   categories: string[];
   groups: CategoryGroup[];
+  discovery_professions: DiscoveryProfession[];
+  domain_labels: Record<string, string>;
   curated_help: string;
+};
+
+export type DiscoveryProfession = {
+  domain: string;
+  label: string;
 };
 
 export type LeaderboardEntry = {
@@ -90,7 +99,6 @@ export type LeaderboardEntry = {
 export type LeaderboardsResponse = {
   top_picks: LeaderboardEntry[];
   trending: LeaderboardEntry[];
-  by_profession: { id: string; label: string; items: LeaderboardEntry[] }[];
   by_domain: { domain: string; label: string; items: LeaderboardEntry[] }[];
   total_curated: number;
 };
@@ -107,7 +115,7 @@ function parseApiError(text: string, status: number, statusText: string): string
     return "GitHub rate limit exceeded. Add a token in Settings and try again.";
   }
   if (status >= 500 || statusText === "Internal Server Error") {
-    return "Backend unavailable. Run npm run dev from cursor-skills-studio (API on port 8765).";
+    return "Backend unavailable. From the project folder run: npm run dev (API on port 8765).";
   }
   return statusText || `Request failed (${status})`;
 }
@@ -131,8 +139,59 @@ export const getSettings = () =>
   api<{
     project_dir: string;
     github_token_set: boolean;
-    curated_exists: boolean;
+    db_path: string;
+    asset_count: number;
+    synced_content_count: number;
+    last_synced_at?: string;
+    last_sync_status?: string;
   }>("/api/settings");
+
+export type CatalogResponse = {
+  assets: Asset[];
+  total: number;
+  stats: {
+    total_assets: number;
+    synced_content: number;
+    last_sync?: Record<string, unknown>;
+  };
+};
+
+export const getCatalog = (params?: {
+  domain?: string;
+  asset_type?: string;
+  q?: string;
+  period?: string;
+  limit?: number;
+}) => {
+  const sp = new URLSearchParams();
+  if (params?.domain) sp.set("domain", params.domain);
+  if (params?.asset_type) sp.set("asset_type", params.asset_type);
+  if (params?.q) sp.set("q", params.q);
+  if (params?.period) sp.set("period", params.period);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  const q = sp.toString();
+  return api<CatalogResponse>(`/api/catalog${q ? `?${q}` : ""}`);
+};
+
+export const getAssetDetail = (id: string) =>
+  api<Asset>(`/api/asset?id=${encodeURIComponent(id)}`);
+
+export const postSync = (force = false) =>
+  api<{ updated: number; errors: string[]; status: string; stats: CatalogResponse["stats"] }>(
+    "/api/sync",
+    { method: "POST", body: JSON.stringify({ force }) }
+  );
+
+export const postRegistryExpand = () =>
+  api<{
+    added: number;
+    updated: number;
+    errors: string[];
+    stats: CatalogResponse["stats"];
+  }>("/api/registry/expand", { method: "POST" });
+
+export const getSyncStatus = () =>
+  api<{ last_sync: Record<string, unknown>; stats: CatalogResponse["stats"] }>("/api/sync/status");
 
 export const patchSettings = (body: {
   project_dir?: string;

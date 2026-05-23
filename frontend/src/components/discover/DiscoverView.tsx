@@ -1,10 +1,10 @@
 import type { Studio } from "../../hooks/useStudio";
 import { ActivityLog } from "../ActivityLog";
 import { Button } from "../ui/Button";
-import { CatalogGrid } from "./CatalogGrid";
-import { CategoryFilters } from "./CategoryFilters";
-import { DiscoverToolbar } from "./DiscoverToolbar";
-import { MarketplaceSpotlight } from "./MarketplaceSpotlight";
+import { CustomSearchView } from "./CustomSearchView";
+import { DiscoverModeSwitch } from "./DiscoverModeSwitch";
+import { DiscoveryDashboard } from "./DiscoveryDashboard";
+import { InstallTargetsBar } from "./InstallTargetsBar";
 
 type Props = { studio: Studio };
 
@@ -15,52 +15,68 @@ export function DiscoverView({ studio }: Props) {
     filteredAssets,
     selectedIds,
     selectedCats,
-    categoryGroups,
-    hasCatalog,
+    discoverMode,
+    setDiscoverMode,
     fetchCatalog,
     runInstall,
     refresh,
-    toggleCat,
-    selectAllCats,
-    clearCats,
-    toggleRow,
     log,
     logOpen,
     setLogOpen,
+    backendReady,
   } = studio;
 
   return (
     <main className="discover" id="discover">
+      {!backendReady ? (
+        <div className="connection-banner" role="alert">
+          <span>API not connected — start the backend with </span>
+          <code className="mono">npm run dev</code>
+          <span> in the skill-harbor folder, then </span>
+          <button type="button" className="link-btn" onClick={() => refresh()} disabled={busy}>
+            retry
+          </button>
+        </div>
+      ) : null}
+
       <header className="discover-header">
         <div className="discover-header-text">
-          <h2>Discover</h2>
+          <h2>Marketplace</h2>
           <p>
-            Find skills by profession or stack.{" "}
-            <abbr title={curatedHelp} className="curated-tip">
-              Curated
-            </abbr>{" "}
-            entries are editor-picked from our manifest.
+            {discoverMode === "discovery" ? (
+              <>
+                Trending by period, personalized picks, and top skills by profession. Use{" "}
+                <strong>24h / 7d / 30d / 1y</strong> to change the GitHub ranking window.
+              </>
+            ) : (
+              <>Search, filter, and browse the full catalog as cards.</>
+            )}
           </p>
         </div>
         <div className="discover-stats" aria-live="polite">
           <span>
-            <strong>{filteredAssets.length}</strong> shown
+            <strong>{discoverMode === "discovery" ? selectedIds.size : filteredAssets.length}</strong>
+            {discoverMode === "discovery" ? " selected" : " shown"}
           </span>
-          <span className="stat-sep" aria-hidden>
-            ·
-          </span>
-          <span>
-            <strong>{selectedIds.size}</strong> selected
-          </span>
-          <span className="stat-sep" aria-hidden>
-            ·
-          </span>
-          <span>
-            <strong>{selectedCats.size}</strong> categories
-          </span>
+          {discoverMode === "search" ? (
+            <>
+              <span className="stat-sep" aria-hidden>
+                ·
+              </span>
+              <span>
+                <strong>{selectedIds.size}</strong> selected
+              </span>
+              <span className="stat-sep" aria-hidden>
+                ·
+              </span>
+              <span>
+                <strong>{selectedCats.size}</strong> categories
+              </span>
+            </>
+          ) : null}
         </div>
         <div className="discover-actions">
-          <Button variant="primary" onClick={fetchCatalog} disabled={busy}>
+          <Button variant="primary" onClick={() => fetchCatalog()} disabled={busy}>
             {busy ? "Working…" : "Fetch catalog"}
           </Button>
           <Button
@@ -76,28 +92,15 @@ export function DiscoverView({ studio }: Props) {
         </div>
       </header>
 
-      <MarketplaceSpotlight {...studio} />
+      <DiscoverModeSwitch mode={discoverMode} onChange={setDiscoverMode} />
 
-      <DiscoverToolbar {...studio} />
+      {discoverMode === "discovery" ? <InstallTargetsBar {...studio} /> : null}
 
-      <CategoryFilters
-        groups={categoryGroups}
-        selectedCats={selectedCats}
-        onToggle={toggleCat}
-        onSelectAll={selectAllCats}
-        onClear={clearCats}
-      />
-
-      <section className="catalog" aria-label="Catalog results">
-        <CatalogGrid
-          assets={filteredAssets}
-          selectedIds={selectedIds}
-          hasCatalog={hasCatalog}
-          busy={busy}
-          onFetch={fetchCatalog}
-          onToggle={toggleRow}
-        />
-      </section>
+      {discoverMode === "discovery" ? (
+        <DiscoveryDashboard {...studio} curatedHelp={curatedHelp} />
+      ) : (
+        <CustomSearchView studio={studio} />
+      )}
 
       <ActivityLog log={log} logOpen={logOpen} setLogOpen={setLogOpen} />
     </main>

@@ -296,6 +296,7 @@ class Asset:
     curated: bool = False
     curated_rank: int = 0
     curated_title: str = ""
+    repo_pushed_at: str = ""
 
 
 @dataclass
@@ -380,9 +381,23 @@ class GitHubClient:
             raise GitHubRateLimitError("GitHub API rate limit already hit; skipping repo metadata.")
         return self.request_json(f"{API_HOST}/repos/{owner}/{repo}")
 
+    def resolve_branch(self, owner: str, repo: str) -> str:
+        if self.use_api_metadata:
+            try:
+                meta = self.repo_meta(owner, repo)
+                return meta.get("default_branch") or "main"
+            except Exception:
+                pass
+        for branch in DEFAULT_BRANCH_CANDIDATES:
+            try:
+                self.request_text(raw_url(owner, repo, branch, "README.md"))
+                return branch
+            except Exception:
+                continue
+        return "main"
+
     def default_branch(self, owner: str, repo: str) -> str:
-        meta = self.repo_meta(owner, repo)
-        return meta.get("default_branch") or "main"
+        return self.resolve_branch(owner, repo)
 
     def fetch_raw_file(
         self,
@@ -462,17 +477,23 @@ def is_candidate_path(path: str) -> str | None:
 
     if name == "agents.md" and lower.endswith("agents.md"):
         return "agents_md"
-    if name.lower() == SKILL_FILENAME.lower() and "/.cursor/skills/" in f"/{lower}":
-        return "skill"
-    if name.endswith(".mdc") and "/.cursor/rules/" in f"/{lower}":
-        return "rule"
+    if name.lower() == SKILL_FILENAME.lower():
+        if "/skills/" in lower or "/.cursor/skills/" in f"/{lower}":
+            return "skill"
+    if name.endswith(".mdc"):
+        if (
+            "/rules/" in lower
+            or "/.cursor/rules/" in f"/{lower}"
+            or lower.startswith("rules/")
+        ):
+            return "rule"
     if name.endswith(".md") and "/.cursor/commands/" in f"/{lower}":
         return "command"
     if name.endswith(".md") and "/.cursor/agents/" in f"/{lower}":
         return "agent"
     if name == ".cursorrules":
         return "rule"
-    if name.endswith(".md") and "/rules/" in lower and "cursor" in lower:
+    if name.endswith(".md") and "/rules/" in lower:
         return "rule"
     return None
 
@@ -566,6 +587,7 @@ def fetch_curated_assets(
     assets: list[Asset] = []
     branch_cache: dict[str, str] = {}
     stars_cache: dict[str, int] = {}
+    pushed_cache: dict[str, str] = {}
 
     for entry in entries:
         owner = entry["owner"]
@@ -581,19 +603,26 @@ def fetch_curated_assets(
                 branch_cache[full_name] = branch
                 if full_name not in stars_cache:
                     stars_cache[full_name] = int(entry.get("stars") or 0)
+                if client.use_api_metadata and full_name not in pushed_cache:
+                    try:
+                        meta = client.repo_meta(owner, repo)
+                        stars_cache[full_name] = int(meta.get("stargazers_count") or stars_cache[full_name])
+                        pushed_cache[full_name] = str(meta.get("pushed_at") or "")
+                    except Exception:
+                        pushed_cache[full_name] = ""
                 if full_name not in report.repos_scanned:
                     report.repos_scanned.append(full_name)
             else:
                 branch = branch_cache[full_name]
                 text = client.request_text(raw_url(owner, repo, branch, path))
             stars = stars_cache.get(full_name, 0)
+            pushed_at = pushed_cache.get(full_name, "")
             url = raw_url(owner, repo, branch_cache[full_name], path)
         except Exception as e:
             msg = f"curated [{entry.get('title', path)}] {full_name}/{path}: {e}"
             if optional:
-                report.errors.append(f"(optional skip) {msg}")
-            else:
-                report.errors.append(msg)
+                continue
+            report.errors.append(msg)
             continue
 
         rank = int(entry.get("rank", 5))
@@ -632,6 +661,7 @@ def fetch_curated_assets(
             curated=True,
             curated_rank=rank,
             curated_title=str(entry.get("title", "")),
+            repo_pushed_at=pushed_at,
         )
         setattr(asset, "_content", text)
         assets.append(asset)

@@ -14,11 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from studio import config, cursor_paths, export_import, leaderboards, scraper_bridge
+from studio.catalog import CatalogService
+from studio.database import DB_PATH
+from studio import sync as harbor_sync
 
 app = FastAPI(
     title="Skill Harbor",
-    description="Marketplace API for Cursor skills, rules, commands, and subagents",
-    version="0.2.0",
+    description="By Devs, For Devs — marketplace API for Cursor skills, rules, commands, and subagents",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -33,6 +36,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+catalog = CatalogService()
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    catalog.ensure_seeded()
+
 
 class SettingsUpdate(BaseModel):
     project_dir: str | None = None
@@ -44,6 +54,10 @@ class PreviewRequest(BaseModel):
     top_per_category: int = 5
     curated_only: bool = True
     include_discovery: bool = False
+
+
+class SyncRequest(BaseModel):
+    force: bool = False
 
 
 class InstallRequest(BaseModel):
@@ -80,12 +94,17 @@ def health() -> dict[str, str]:
 def get_settings() -> dict[str, Any]:
     token = config.get_github_token()
     project = config.get_project_dir()
+    stats = catalog.stats()
+    last = stats.get("last_sync") or {}
     return {
         "project_dir": str(project),
-        "github_token_set": bool(token),
+        "github_token_set": False,
         "config_path": str(config.CONFIG_PATH),
-        "curated_manifest": str(scraper_bridge.CURATED_PATH),
-        "curated_exists": scraper_bridge.CURATED_PATH.is_file(),
+        "db_path": str(DB_PATH),
+        "asset_count": stats.get("total_assets", 0),
+        "synced_content_count": stats.get("synced_content", 0),
+        "last_synced_at": last.get("finished_at") or last.get("started_at"),
+        "last_sync_status": last.get("status"),
     }
 
 
@@ -100,7 +119,6 @@ def patch_settings(body: SettingsUpdate) -> dict[str, Any]:
 
 @app.get("/api/connection")
 def connection() -> dict[str, Any]:
-    """Cursor filesystem locations (how the app 'connects' to Cursor)."""
     project = config.get_project_dir()
     info = cursor_paths.cursor_connection_info(project)
     info["note"] = (
@@ -114,6 +132,10 @@ def connection() -> dict[str, Any]:
 @app.get("/api/categories")
 def categories() -> dict[str, Any]:
     meta = scraper_bridge.list_category_meta()
+    meta["curated_help"] = (
+        "Harbor registry — community assets stored locally in harbor.db. "
+        "Sync registry to refresh content from GitHub."
+    )
     return meta
 
 
@@ -122,25 +144,95 @@ def get_leaderboards() -> dict[str, Any]:
     return leaderboards.build_leaderboards()
 
 
+@app.get("/api/catalog")
+def get_catalog(
+    domain: str | None = None,
+    asset_type: str | None = None,
+    q: str | None = None,
+    period: str = "all",
+    limit: int = 200,
+    offset: int = 0,
+) -> dict[str, Any]:
+    assets, total = catalog.list_assets(
+        domain=domain,
+        asset_type=asset_type,
+        q=q,
+        period=period,
+        limit=min(limit, 500),
+        offset=offset,
+    )
+    project = config.get_project_dir()
+    enriched = harbor_sync.enrich_catalog_assets(assets, project)
+    return {
+        "assets": enriched,
+        "total": total,
+        "stats": catalog.stats(),
+    }
+
+
+@app.get("/api/asset")
+def get_asset_detail(id: str) -> dict[str, Any]:
+    row = catalog.get_asset(id)
+    if not row:
+        raise HTTPException(404, f"Asset not found: {id}")
+    project = config.get_project_dir()
+    enriched = harbor_sync.enrich_catalog_assets([row], project)
+    asset = enriched[0] if enriched else row
+    asset["content"] = row.get("content", "")
+    return asset
+
+
+@app.get("/api/assets/{asset_id:path}")
+def get_asset_detail_path(asset_id: str) -> dict[str, Any]:
+    return get_asset_detail(asset_id)
+
+
+@app.post("/api/registry/expand")
+def registry_expand() -> dict[str, Any]:
+    from studio.registry_expand import expand_registry
+
+    try:
+        return expand_registry(max_files_per_repo=150)
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+
+
+@app.post("/api/sync")
+def sync_registry(body: SyncRequest | None = None) -> dict[str, Any]:
+    force = body.force if body else False
+    try:
+        result = harbor_sync.sync_catalog(force=force)
+        return {**result, "stats": catalog.stats()}
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+
+
+@app.get("/api/sync/status")
+def sync_status() -> dict[str, Any]:
+    stats = catalog.stats()
+    return {"last_sync": stats.get("last_sync"), "stats": stats}
+
+
 @app.post("/api/preview")
 def preview(body: PreviewRequest) -> dict[str, Any]:
-    cats = body.categories or []
-    try:
-        return scraper_bridge.run_curated_preview(
-            categories=cats,
-            top_per_category=body.top_per_category,
-            token=config.get_github_token(),
-            curated_only=not body.include_discovery,
-            project_dir=config.get_project_dir(),
-        )
-    except Exception as e:
-        msg = str(e) or "Preview failed"
-        if "rate limit" in msg.lower():
-            raise HTTPException(
-                429,
-                "GitHub rate limit exceeded. Add a token in Settings and retry in a few minutes.",
-            ) from e
-        raise HTTPException(500, msg) from e
+    """Backward compat — returns catalog from DB."""
+    assets, total = catalog.list_assets(limit=500)
+    project = config.get_project_dir()
+    enriched = harbor_sync.enrich_catalog_assets(assets, project)
+    if body.categories:
+        cat_set = set(body.categories)
+        enriched = [
+            a
+            for a in enriched
+            if any(c in cat_set for c in (a.get("domains") or []) + (a.get("categories") or []))
+        ]
+    return {
+        "assets": enriched,
+        "errors": [],
+        "repos_scanned": sorted({a.get("source_repo", "") for a in enriched}),
+        "generated_at": catalog.stats().get("last_sync", {}).get("finished_at"),
+        "category_meta": scraper_bridge.list_category_meta(),
+    }
 
 
 @app.post("/api/install")

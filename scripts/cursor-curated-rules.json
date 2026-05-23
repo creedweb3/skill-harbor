@@ -2,12 +2,66 @@
   "version": 1,
   "description": "Curated Cursor rules (.mdc) from awesome-cursorrules and similar repos.",
   "entries": [
-    {"category": "web-development", "rank": 1, "title": "Next.js rules", "owner": "PatrickJS", "repo": "awesome-cursorrules", "path": "rules/nextjs.mdc", "asset_type": "rule", "install_folder": "patrick-nextjs.mdc", "stars": 22000},
-    {"category": "web-development", "rank": 2, "title": "React rules", "owner": "PatrickJS", "repo": "awesome-cursorrules", "path": "rules/react.mdc", "asset_type": "rule", "install_folder": "patrick-react.mdc"},
-    {"category": "web-development", "rank": 3, "title": "TypeScript rules", "owner": "PatrickJS", "repo": "awesome-cursorrules", "path": "rules/typescript.mdc", "asset_type": "rule", "install_folder": "patrick-typescript.mdc"},
-    {"category": "web-development", "rank": 4, "title": "Tailwind CSS rules", "owner": "PatrickJS", "repo": "awesome-cursorrules", "path": "rules/tailwind.mdc", "asset_type": "rule", "install_folder": "patrick-tailwind.mdc"},
-    {"category": "full-stack", "rank": 1, "title": "Clean code rules", "owner": "PatrickJS", "repo": "awesome-cursorrules", "path": "rules/clean-code.mdc", "asset_type": "rule", "install_folder": "patrick-clean-code.mdc"},
-    {"category": "backend-apis", "rank": 1, "title": "Python rules", "owner": "PatrickJS", "repo": "awesome-cursorrules", "path": "rules/python.mdc", "asset_type": "rule", "install_folder": "patrick-python.mdc"},
-    {"category": "agent-ai", "rank": 1, "title": "Awesome cursor rules (tugkanboz)", "owner": "tugkanboz", "repo": "awesome-cursorrules", "path": "rules/general.mdc", "asset_type": "rule", "install_folder": "tugkan-general.mdc", "optional": true}
+    {
+      "category": "web-development",
+      "rank": 1,
+      "title": "Next.js rules",
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "path": "rules/nextjs.mdc",
+      "asset_type": "rule",
+      "install_folder": "patrick-nextjs.mdc",
+      "stars": 22000
+    },
+    {
+      "category": "web-development",
+      "rank": 2,
+      "title": "React rules",
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "path": "rules/react.mdc",
+      "asset_type": "rule",
+      "install_folder": "patrick-react.mdc"
+    },
+    {
+      "category": "web-development",
+      "rank": 3,
+      "title": "TypeScript rules",
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "path": "rules/typescript.mdc",
+      "asset_type": "rule",
+      "install_folder": "patrick-typescript.mdc"
+    },
+    {
+      "category": "web-development",
+      "rank": 4,
+      "title": "Tailwind CSS rules",
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "path": "rules/tailwind.mdc",
+      "asset_type": "rule",
+      "install_folder": "patrick-tailwind.mdc"
+    },
+    {
+      "category": "full-stack",
+      "rank": 1,
+      "title": "Clean code rules",
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "path": "rules/clean-code.mdc",
+      "asset_type": "rule",
+      "install_folder": "patrick-clean-code.mdc"
+    },
+    {
+      "category": "backend-apis",
+      "rank": 1,
+      "title": "Python rules",
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "path": "rules/python.mdc",
+      "asset_type": "rule",
+      "install_folder": "patrick-python.mdc"
+    }
   ]
 }

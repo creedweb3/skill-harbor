@@ -62,6 +62,8 @@ def list_category_meta() -> dict[str, Any]:
     return {
         "groups": taxonomy.CATEGORY_GROUPS,
         "categories": list_categories(),
+        "discovery_professions": taxonomy.DISCOVERY_PROFESSIONS,
+        "domain_labels": taxonomy.DOMAIN_LABELS,
         "curated_help": (
             "Curated = hand-picked from the community manifest (cursor-curated-skills.json), "
             "vetted for quality — not random GitHub search results."

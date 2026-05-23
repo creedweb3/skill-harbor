@@ -1,31 +1,41 @@
 import type { Studio } from "../../hooks/useStudio";
 import { Button } from "../ui/Button";
 import { Field, TextInput } from "../ui/Field";
+import { postRegistryExpand } from "../../api";
 
-type Props = Pick<
-  Studio,
-  | "connection"
-  | "projectDir"
-  | "setProjectDir"
-  | "tokenInput"
-  | "setTokenInput"
-  | "tokenSet"
-  | "busy"
-  | "saveSettings"
-  | "clearGithubToken"
->;
+type Props = { studio: Studio };
 
-export function SetupPanel({
-  connection,
-  projectDir,
-  setProjectDir,
-  tokenInput,
-  setTokenInput,
-  tokenSet,
-  busy,
-  saveSettings,
-  clearGithubToken,
-}: Props) {
+export function SetupPanel({ studio }: Props) {
+  const {
+    connection,
+    projectDir,
+    setProjectDir,
+    busy,
+    saveSettings,
+    dbStats,
+    syncRegistry,
+    loadCatalog,
+    pushLog,
+    setBusy,
+  } = studio;
+
+  const expandRegistry = async () => {
+    setBusy(true);
+    pushLog("Expanding registry from community repos (no token needed)…");
+    try {
+      const result = await postRegistryExpand();
+      pushLog(
+        `Registry: +${result.added} new, ${result.updated} updated — ${result.stats?.total_assets ?? "?"} total`,
+        "ok"
+      );
+      await loadCatalog();
+    } catch (e) {
+      pushLog(String(e), "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="sidebar-panel">
       <section className="sidebar-section" aria-labelledby="conn-heading">
@@ -54,8 +64,24 @@ export function SetupPanel({
         </ul>
       </section>
 
+      <section className="sidebar-section" aria-labelledby="registry-heading">
+        <h2 id="registry-heading">Harbor registry</h2>
+        <p className="hint">
+          {dbStats?.asset_count ?? 0} assets in local database · ranked by GitHub stars
+        </p>
+        <div className="btn-row">
+          <Button variant="primary" full onClick={() => expandRegistry()} disabled={busy}>
+            {busy ? "Working…" : "Expand registry"}
+          </Button>
+          <Button variant="ghost" full onClick={() => syncRegistry()} disabled={busy}>
+            Sync file content
+          </Button>
+        </div>
+        <p className="hint">No GitHub token required — uses public raw files.</p>
+      </section>
+
       <section className="sidebar-section" aria-labelledby="settings-heading">
-        <h2 id="settings-heading">Settings</h2>
+        <h2 id="settings-heading">Project</h2>
         <Field label="Project directory">
           <TextInput
             type="text"
@@ -64,32 +90,9 @@ export function SetupPanel({
             placeholder="C:\path\to\repo"
           />
         </Field>
-        <Field
-          label={
-            <>
-              GitHub token {tokenSet ? <span className="saved-badge">saved</span> : null}
-            </>
-          }
-          hint="For accurate star counts and optional repo search"
-        >
-          <TextInput
-            type="password"
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            placeholder={tokenSet ? "••••••••" : "ghp_…"}
-            autoComplete="off"
-          />
-        </Field>
-        <div className="btn-row">
-          <Button variant="ghost" full onClick={saveSettings} disabled={busy}>
-            Save settings
-          </Button>
-          {tokenSet ? (
-            <Button variant="ghost" size="sm" full onClick={clearGithubToken} disabled={busy}>
-              Remove token
-            </Button>
-          ) : null}
-        </div>
+        <Button variant="ghost" full onClick={saveSettings} disabled={busy}>
+          Save project path
+        </Button>
       </section>
     </div>
   );
