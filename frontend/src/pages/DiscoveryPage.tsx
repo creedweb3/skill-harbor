@@ -1,7 +1,13 @@
 import { useMemo } from "react";
 import type { Studio } from "../hooks/useStudio";
-import { buildDiscoverySections, type DashboardItem } from "../lib/dashboard";
+import {
+  buildDiscoverySections,
+  DOMAIN_LIMIT,
+  TRENDING_LIMIT,
+  type DashboardItem,
+} from "../lib/dashboard";
 import { AssetRankCard } from "../components/dashboard/AssetRankCard";
+import { RepoTrendCard } from "../components/dashboard/RepoTrendCard";
 import { TrendPeriodSwitch } from "../components/discover/TrendPeriodSwitch";
 
 type Props = { studio: Studio };
@@ -18,6 +24,8 @@ export function DiscoveryPage({ studio }: Props) {
     selectedAssetId,
     setSelectedAssetId,
     selectedIds,
+    toggleRow,
+    toggleSelectAllForIds,
     dbStats,
   } = studio;
 
@@ -37,12 +45,23 @@ export function DiscoveryPage({ studio }: Props) {
   const forYou = sections.find((s) => s.kind === "for_you");
   const professions = sections.filter((s) => s.kind === "profession");
 
+  const repoTrends =
+    trending?.kind === "trending" ? trending.repoTrends.slice(0, TRENDING_LIMIT) : [];
+
+  const forYouItems = (forYou?.items ?? []).filter(
+    (item): item is DashboardItem & { asset: NonNullable<DashboardItem["asset"]> } => !!item.asset
+  );
+
+  const forYouIds = useMemo(() => forYouItems.map((item) => item.asset.id), [forYouItems]);
+  const allForYouSelected =
+    forYouIds.length > 0 && forYouIds.every((id) => selectedIds.has(id));
+
   const openAsset = (item: DashboardItem) => {
     setSelectedAssetId(item.asset?.id ?? item.id);
   };
 
   return (
-    <div className="harbor-page">
+    <div className="harbor-page discovery-page">
       <section className="harbor-kpi-strip">
         <div className="harbor-kpi">
           <strong>{dbStats?.asset_count ?? assets.length}</strong>
@@ -58,83 +77,108 @@ export function DiscoveryPage({ studio }: Props) {
         </div>
       </section>
 
-      {trending ? (
-        <section style={{ marginBottom: "1.5rem" }}>
-          <header
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "space-between",
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
+      {repoTrends.length > 0 ? (
+        <section className="discovery-section">
+          <header className="discovery-section-head">
             <div>
-              <span className="harbor-badge">GitHub Trending</span>
-              <h2 style={{ margin: "0.5rem 0 0", fontSize: "1.25rem" }}>{trending.label}</h2>
-              <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--harbor-muted)" }}>
-                {trending.description}
-              </p>
+              <span className="harbor-badge harbor-badge--section">GitHub Trending</span>
+              <h2>{trending?.label}</h2>
+              <p className="muted">{trending?.description}</p>
             </div>
             <TrendPeriodSwitch period={trendPeriod} onChange={setTrendPeriod} hasLiveData={hasCatalog} />
           </header>
-          <div className="harbor-masonry">
-            {trending.items.map((item, i) =>
-              item.asset ? (
+          <div className="harbor-card-grid harbor-card-grid--row">
+            {repoTrends.map((trend, i) => (
+              <RepoTrendCard
+                key={trend.source_repo}
+                sourceRepo={trend.source_repo}
+                stars={trend.stars}
+                assetCount={trend.assetCount}
+                representative={trend.representative}
+                rank={i + 1}
+                selected={selectedAssetId === trend.representative.id}
+                onSelect={() => setSelectedAssetId(trend.representative.id)}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {forYou ? (
+        <section className="discovery-section">
+          <header className="discovery-section-head discovery-section-head--compact">
+            <div>
+              <span className="harbor-badge harbor-badge--section">Personalized</span>
+              <h2>{forYou.label}</h2>
+              <p className="muted">{forYou.description}</p>
+            </div>
+            {forYouItems.length > 0 ? (
+              <div className="discovery-section-actions">
+                <button
+                  type="button"
+                  className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+                  onClick={() => toggleSelectAllForIds(forYouIds)}
+                >
+                  {allForYouSelected ? "Deselect section" : "Select section"}
+                </button>
+              </div>
+            ) : null}
+          </header>
+          {forYouItems.length > 0 ? (
+            <div className="harbor-card-grid harbor-card-grid--row">
+              {forYouItems.map((item, i) => (
                 <AssetRankCard
                   key={item.id}
                   asset={item.asset}
                   rank={i + 1}
+                  checked={selectedIds.has(item.asset.id)}
+                  onToggleCheck={() => toggleRow(item.asset.id)}
                   selected={selectedAssetId === item.asset.id}
                   onSelect={() => openAsset(item)}
                 />
-              ) : null
-            )}
-          </div>
-        </section>
-      ) : null}
-
-      {forYou && forYou.items.length > 0 ? (
-        <section style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: 8 }}>For You</h2>
-          <div className="harbor-scroll-row">
-            {forYou.items.map((item) =>
-              item.asset ? (
-                <AssetRankCard
-                  key={item.id}
-                  asset={item.asset}
-                  selected={selectedAssetId === item.asset.id}
-                  onSelect={() => openAsset(item)}
-                />
-              ) : null
-            )}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="discovery-empty-hint muted">
+              Install a few skills from Browse — recommendations will appear here based on what you use.
+            </p>
+          )}
         </section>
       ) : null}
 
       {professions.length > 0 ? (
-        <section>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: 12 }}>By profession · top 5 by stars</h2>
-          <div className="harbor-masonry">
-            {professions.map((section) => (
-              <div key={section.id} className="harbor-card" style={{ padding: "0.75rem 0" }}>
-                <h3 style={{ margin: "0 0 0.75rem", padding: "0 1rem", fontSize: "0.9rem" }}>
-                  {section.label}
-                </h3>
-                {section.items.slice(0, 5).map((item) =>
-                  item.asset ? (
-                    <div key={item.id} style={{ marginBottom: 6 }}>
+        <section className="discovery-section">
+          <h2 className="discovery-section-title">
+            By profession · top {DOMAIN_LIMIT} skills by stars
+          </h2>
+          <div className="profession-panels harbor-bento">
+            {professions.map((section) => {
+              const items = section.items
+                .filter(
+                  (item): item is DashboardItem & { asset: NonNullable<DashboardItem["asset"]> } =>
+                    !!item.asset
+                )
+                .slice(0, DOMAIN_LIMIT);
+              if (items.length === 0) return null;
+              return (
+                <article key={section.id} className="profession-panel">
+                  <h3 className="profession-panel__title">{section.label}</h3>
+                  <div className="profession-panel__cards">
+                    {items.map((item, i) => (
                       <AssetRankCard
+                        key={item.id}
                         asset={item.asset}
-                        rank={item.rank}
+                        rank={i + 1}
+                        checked={selectedIds.has(item.asset.id)}
+                        onToggleCheck={() => toggleRow(item.asset.id)}
                         selected={selectedAssetId === item.asset.id}
                         onSelect={() => openAsset(item)}
                       />
-                    </div>
-                  ) : null
-                )}
-              </div>
-            ))}
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}

@@ -441,10 +441,26 @@ class GitHubClient:
                 paths.append(item["path"])
         return paths
 
-    def search_repositories(self, query: str, per_page: int = 10) -> list[dict[str, Any]]:
+    def search_repositories(
+        self, query: str, per_page: int = 10, page: int = 1
+    ) -> list[dict[str, Any]]:
         data = self.request_json(
             f"{API_HOST}/search/repositories",
-            {"q": query, "sort": "stars", "order": "desc", "per_page": str(per_page)},
+            {
+                "q": query,
+                "sort": "stars",
+                "order": "desc",
+                "per_page": str(max(1, min(100, per_page))),
+                "page": str(max(1, page)),
+            },
+        )
+        return list(data.get("items") or [])
+
+    def search_code(self, query: str, per_page: int = 3) -> list[dict[str, Any]]:
+        """Search code in repos — requires auth; 9 req/min limit."""
+        data = self.request_json(
+            f"{API_HOST}/search/code",
+            {"q": query, "per_page": str(max(1, min(100, per_page)))},
         )
         return list(data.get("items") or [])
 
@@ -473,27 +489,61 @@ def classify_text(text: str, path: str = "") -> tuple[list[str], float]:
 
 def is_candidate_path(path: str) -> str | None:
     lower = path.replace("\\", "/").lower()
+    normalized = f"/{lower.strip('/')}/"
     name = Path(path).name
+
+    if name.startswith("_") or "_template" in lower:
+        return None
+
+    blocked = (
+        "/node_modules/",
+        "/vendor/",
+        "/dist/",
+        "/build/",
+        "/.github/workflows/",
+        "/__pycache__/",
+    )
+    if any(b in normalized for b in blocked):
+        return None
 
     if name == "agents.md" and lower.endswith("agents.md"):
         return "agents_md"
+
     if name.lower() == SKILL_FILENAME.lower():
-        if "/skills/" in lower or "/.cursor/skills/" in f"/{lower}":
+        if any(
+            marker in normalized
+            for marker in (
+                "/skills/",
+                "/.cursor/skills/",
+                "/.claude/skills/",
+                "/agent-skills/",
+                "/capabilities/",
+            )
+        ):
             return "skill"
+        # e.g. brand-guidelines/SKILL.md or composio-skills/foo/SKILL.md
+        parts = [p for p in lower.split("/") if p]
+        if len(parts) >= 2 and parts[-1] == "skill.md":
+            if not any(x in normalized for x in ("/docs/", "/documentation/", "/test/", "/tests/")):
+                return "skill"
+        return None
+
     if name.endswith(".mdc"):
-        if (
-            "/rules/" in lower
-            or "/.cursor/rules/" in f"/{lower}"
-            or lower.startswith("rules/")
+        if any(
+            marker in normalized
+            for marker in ("/rules/", "/.cursor/rules/", "/.claude/rules/")
         ):
             return "rule"
-    if name.endswith(".md") and "/.cursor/commands/" in f"/{lower}":
+        if lower.endswith(".mdc") and lower.count("/") <= 1:
+            return "rule"
+
+    if name.endswith(".md") and "/.cursor/commands/" in normalized:
         return "command"
-    if name.endswith(".md") and "/.cursor/agents/" in f"/{lower}":
+    if name.endswith(".md") and "/.cursor/agents/" in normalized:
         return "agent"
     if name == ".cursorrules":
         return "rule"
-    if name.endswith(".md") and "/rules/" in lower:
+    if name.endswith(".md") and "/rules/" in normalized:
         return "rule"
     return None
 
@@ -507,21 +557,31 @@ def content_hash(text: str) -> str:
 
 
 def install_name_for(asset_type: str, repo: str, path: str) -> str:
-    base = Path(path).stem
-    if asset_type == "skill":
-        # skill folder name from parent directory
-        parts = Path(path).parts
-        if "skills" in parts:
-            idx = parts.index("skills")
-            if idx + 1 < len(parts):
-                base = parts[idx + 1]
+    """Delegate to studio.naming when backend is on sys.path (Harbor app)."""
+    try:
+        from studio.naming import install_name_for as harbor_install
+
+        return harbor_install(asset_type, repo, path)
+    except ImportError:
+        pass
+
+    p = Path(path.replace("\\", "/"))
     slug_repo = slugify(repo.split("/")[-1], 24)
-    slug_path = slugify(str(Path(path).with_suffix("")), 48)
-    if asset_type == "rule":
-        ext = ".mdc" if not path.endswith(".cursorrules") else ".mdc"
-        return f"{slug_repo}--{slug_path}{ext}"
     if asset_type == "skill":
+        if p.name.lower() in ("skill.md", "skills.md"):
+            base = p.parent.name
+        else:
+            base = p.stem
+        if base.lower() in ("skill", "skills", ""):
+            parts = p.parts
+            base = parts[-2] if len(parts) >= 2 else base
         return slugify(base, 64)
+    if asset_type == "rule":
+        parent = p.parent.name
+        stem = p.stem
+        core = slugify(f"{parent}-{stem}", 56)
+        return f"{slug_repo}--{core}.mdc"
+    slug_path = slugify(str(p.with_suffix("")), 64)
     return f"{slug_repo}--{slug_path}.md"
 
 
@@ -720,11 +780,13 @@ def discover_repos(
 
 def path_priority(path: str, categories_filter: list[str]) -> int:
     """Higher = fetch first when capping files per repo."""
-    blob = path.lower()
+    blob = f"/{path.replace(chr(92), '/').strip('/')}/".lower()
     score = 0
-    if "/.cursor/skills/" in blob or "/.cursor/rules/" in blob:
+    if "/.cursor/skills/" in blob or "/skills/" in blob:
         score += 5
-    if blob.endswith(".mdc") or blob.endswith(".cursorrules"):
+    if blob.endswith("/skill.md"):
+        score += 4
+    if "/.cursor/rules/" in blob or blob.endswith(".mdc"):
         score += 3
     for cat in categories_filter:
         for kw in CATEGORIES.get(cat, []):

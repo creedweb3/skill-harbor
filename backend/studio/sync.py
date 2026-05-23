@@ -38,8 +38,14 @@ def sync_catalog(*, force: bool = False) -> dict[str, Any]:
                 stars=stars,
                 repo_pushed_at=row.get("repo_pushed_at") or "",
             )
-            domains = taxonomy.classify_domains(text, path, row.get("category"))
-            catalog.upsert_asset({**row, "stars": stars}, domains)
+            classified = taxonomy.classify_asset(text, path, row.get("category"))
+            tech = taxonomy.classify_tech_tags(text, path)
+            catalog.upsert_asset(
+                {**row, "stars": stars},
+                primary_domain=classified.primary_domain,
+                secondary_domains=classified.secondary_domains,
+                tech_tags=tech,
+            )
             updated += 1
         except Exception as e:
             errors.append(f"{aid}: {e}")
@@ -80,4 +86,32 @@ def enrich_catalog_assets(
 
                 asset.content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
         scraper_assets.append(asset)
-    return scraper_bridge.enrich_assets(scraper_assets, project_dir)
+    enriched = scraper_bridge.enrich_assets(scraper_assets, project_dir)
+    by_id = {a["id"]: a for a in assets if a.get("id")}
+    preserve = (
+        "primary_domain",
+        "secondary_domains",
+        "tech_tags",
+        "branch",
+        "github_blob_url",
+        "github_repo_url",
+        "raw_url",
+        "content",
+        "upvotes",
+        "downvotes",
+        "vote_score",
+        "user_vote",
+    )
+    for row in enriched:
+        orig = by_id.get(row.get("id", ""), {})
+        for key in preserve:
+            if key in orig and orig[key] not in (None, "", []):
+                row[key] = orig[key]
+        if orig.get("primary_domain"):
+            primary = orig["primary_domain"]
+            secondary = orig.get("secondary_domains") or []
+            row["primary_domain"] = primary
+            row["secondary_domains"] = secondary
+            row["domains"] = [primary, *[s for s in secondary if s != primary]]
+            row["categories"] = row["domains"]
+    return enriched

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
-import { getAssetDetail, type Asset } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { getAssetDetail, postVote, type Asset } from "../api";
 import type { Studio } from "../hooks/useStudio";
 import { formatStars } from "../lib/format";
+import { assetTypeBadgeClass } from "../lib/assetType";
+import { getVoterId } from "../lib/voter";
 
 type Props = { studio: Studio };
 
@@ -17,21 +19,41 @@ export function AssetDetailPage({ studio }: Props) {
   } = studio;
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
+  const voterId = getVoterId();
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!selectedAssetId) return;
     const cached = assets.find((a) => a.id === selectedAssetId);
-    if (cached?.content) {
-      setAsset(cached);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
-    getAssetDetail(selectedAssetId)
+    getAssetDetail(selectedAssetId, voterId)
       .then(setAsset)
       .catch(() => setAsset(cached ?? null))
       .finally(() => setLoading(false));
-  }, [selectedAssetId, assets]);
+  }, [selectedAssetId, assets, voterId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const vote = async (direction: "up" | "down") => {
+    if (!selectedAssetId) return;
+    try {
+      const result = await postVote(selectedAssetId, direction, voterId);
+      setAsset((prev) =>
+        prev
+          ? {
+              ...prev,
+              upvotes: result.upvotes,
+              downvotes: result.downvotes,
+              vote_score: result.score,
+              user_vote: result.user_vote,
+            }
+          : prev
+      );
+    } catch {
+      /* ignore */
+    }
+  };
 
   if (!selectedAssetId) return null;
 
@@ -51,7 +73,7 @@ export function AssetDetailPage({ studio }: Props) {
           ← Back
         </button>
         <div className="asset-detail-title-block">
-          <span className="harbor-badge">{typeLabel}</span>
+          <span className={assetTypeBadgeClass(asset?.asset_type ?? "skill")}>{typeLabel}</span>
           <h1>{title}</h1>
           <p className="asset-detail-meta">
             <code className="mono">{asset?.source_repo}</code>
@@ -68,6 +90,25 @@ export function AssetDetailPage({ studio }: Props) {
               </>
             ) : null}
           </p>
+          <div className="vote-bar">
+            <button
+              type="button"
+              className={`vote-btn ${asset?.user_vote === 1 ? "active" : ""}`}
+              onClick={() => vote("up")}
+              aria-label="Upvote"
+            >
+              ▲ {asset?.upvotes ?? 0}
+            </button>
+            <button
+              type="button"
+              className={`vote-btn ${asset?.user_vote === -1 ? "active" : ""}`}
+              onClick={() => vote("down")}
+              aria-label="Downvote"
+            >
+              ▼ {asset?.downvotes ?? 0}
+            </button>
+            <span className="muted vote-hint">Anonymous · one vote per browser</span>
+          </div>
         </div>
         <div className="asset-detail-actions">
           <button
@@ -86,14 +127,24 @@ export function AssetDetailPage({ studio }: Props) {
           >
             Install
           </button>
-          {asset?.raw_url ? (
+          {asset?.github_blob_url || asset?.raw_url ? (
             <a
-              href={asset.raw_url}
+              href={asset.github_blob_url || asset.raw_url}
               target="_blank"
               rel="noreferrer"
               className="harbor-btn harbor-btn--ghost"
             >
               Open on GitHub
+            </a>
+          ) : null}
+          {asset?.github_repo_url ? (
+            <a
+              href={asset.github_repo_url}
+              target="_blank"
+              rel="noreferrer"
+              className="harbor-btn harbor-btn--ghost"
+            >
+              View repository
             </a>
           ) : null}
         </div>
@@ -106,7 +157,7 @@ export function AssetDetailPage({ studio }: Props) {
           <pre className="asset-detail-content">{content}</pre>
         ) : (
           <p className="harbor-empty">
-            No content in registry yet. Use <strong>Sync registry</strong> to pull this file from GitHub.
+            No content in registry yet. Use <strong>Sync content</strong> in the top bar.
           </p>
         )}
       </div>

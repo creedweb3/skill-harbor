@@ -7,27 +7,31 @@ from typing import Any
 from studio.catalog import CatalogService
 from studio import taxonomy
 
+# Legacy manifest category ids → taxonomy v2 primary domain
 CURATED_CATEGORY_TO_DOMAIN: dict[str, str] = {
-    "frontend": "web-development",
+    "frontend": "web-frameworks",
     "backend": "backend-apis",
-    "fullstack": "full-stack",
-    "seo": "marketing-seo",
-    "geo-aeo": "marketing-seo",
-    "gsc": "marketing-seo",
-    "database": "database",
+    "fullstack": "web-frameworks",
+    "seo": "growth-seo",
+    "geo-aeo": "growth-seo",
+    "gsc": "growth-seo",
+    "database": "backend-apis",
     "claude": "agent-ai",
     "cursor": "agent-ai",
     "orchestrator": "agent-ai",
-    "ui": "product-design",
-    "ux": "product-design",
-    "mobile-responsive": "mobile-apps",
+    "ui": "design-ux",
+    "ux": "design-ux",
+    "mobile-responsive": "web-frameworks",
     "devops": "devops-infra",
-    "security": "devops-infra",
-    "testing": "web-development",
-    "writing": "writing-docs",
-    "ecommerce": "ecommerce",
+    "security": "testing-security",
+    "testing": "testing-security",
+    "writing": "docs-workflow",
+    "ecommerce": "growth-seo",
     "data": "data-ml",
-    "crypto": "crypto-web3",
+    "crypto": "backend-apis",
+    "intelligence": "agent-ai",
+    "design": "design-ux",
+    "performance": "web-frameworks",
 }
 
 

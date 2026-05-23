@@ -14,20 +14,16 @@ TTL_SECONDS = 7 * 24 * 3600
 
 # Approximate stars when API unavailable (updated periodically)
 FALLBACK_STARS: dict[str, int] = {
-    "anthropics/skills": 139_000,
-    "vercel-labs/agent-skills": 27_000,
-    "vercel-labs/next-skills": 8_000,
-    "vercel-labs/skills": 5_000,
-    "jeffallan/claude-skills": 9_000,
-    "obra/superpowers": 12_000,
-    "supabase/agent-skills": 4_000,
-    "mcollina/skills": 3_000,
-    "davila7/claude-code-templates": 6_000,
-    "sanity-io/agent-toolkit": 2_000,
-    "Bhanunamikaze/Agentic-SEO-Skill": 1_500,
+    "anthropics/skills": 140_000,
+    "mattpocock/skills": 102_000,
+    "VoltAgent/awesome-openclaw-skills": 49_000,
     "PatrickJS/awesome-cursorrules": 22_000,
-    "pbakaus/impeccable": 3_000,
-    "mblode/agent-skills": 2_500,
+    "openai/skills": 20_000,
+    "vercel-labs/skills": 20_000,
+    "vercel-labs/agent-skills": 27_000,
+    "MiniMax-AI/skills": 12_000,
+    "obra/superpowers": 12_000,
+    "jeffallan/claude-skills": 9_000,
 }
 
 

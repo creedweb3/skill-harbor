@@ -15,6 +15,12 @@ export type Asset = {
   asset_type_label: string;
   categories: string[];
   domains: string[];
+  primary_domain?: string;
+  secondary_domains?: string[];
+  tech_tags?: string[];
+  branch?: string;
+  github_blob_url?: string;
+  github_repo_url?: string;
   score: number;
   stars: number;
   content_preview: string;
@@ -26,6 +32,11 @@ export type Asset = {
   curated_title: string;
   install_status: InstallStatus;
   repo_pushed_at?: string;
+  source_type?: string;
+  upvotes?: number;
+  downvotes?: number;
+  vote_score?: number;
+  user_vote?: number;
 };
 
 export type CategoryGroup = {
@@ -49,6 +60,18 @@ export type ConnectionInfo = {
 
 export type InstalledItem = { name: string; path?: string; asset_type?: string };
 
+export type InstalledUpdate = {
+  name: string;
+  scope: "user" | "project";
+  asset_type: string;
+  local_hash: string;
+  registry_hash: string;
+  registry_asset_id: string;
+  registry_title: string;
+  source_repo: string;
+  stars: number;
+};
+
 export type ScopeInfo = {
   exists: boolean;
   skills: { name: string; path: string }[];
@@ -68,11 +91,19 @@ export type ExportBundle = {
   }>;
 };
 
+export type RepoOwnerMeta = {
+  owner: string;
+  asset_count: number;
+  repo_count: number;
+};
+
 export type CategoriesResponse = {
   categories: string[];
   groups: CategoryGroup[];
   discovery_professions: DiscoveryProfession[];
   domain_labels: Record<string, string>;
+  tech_stack_labels?: Record<string, string>;
+  repo_owners?: RepoOwnerMeta[];
   curated_help: string;
 };
 
@@ -103,14 +134,37 @@ export type LeaderboardsResponse = {
   total_curated: number;
 };
 
+export function formatApiError(text: string, status: number, statusText: string): string {
+  return parseApiError(text, status, statusText);
+}
+
 function parseApiError(text: string, status: number, statusText: string): string {
   try {
-    const data = JSON.parse(text) as { detail?: string };
-    if (typeof data.detail === "string" && data.detail) return data.detail;
+    const data = JSON.parse(text) as { detail?: string | { msg?: string }[] };
+    if (typeof data.detail === "string" && data.detail) {
+      if (data.detail === "Internal Server Error") {
+        return "API crashed or is not responding. Stop and restart: npm run dev (check the api terminal for Traceback).";
+      }
+      return data.detail;
+    }
+    if (Array.isArray(data.detail) && data.detail.length) {
+      const first = data.detail[0];
+      if (first && typeof first.msg === "string") return first.msg;
+    }
   } catch {
     /* not JSON */
   }
-  if (text) return text;
+  const plain = text.trim();
+  if (plain === "Internal Server Error" || plain.includes("ECONNREFUSED")) {
+    return "Cannot reach the API on port 8765. Run npm run dev from the project root and reload this page.";
+  }
+  if (plain) return plain;
+  if (status === 401) {
+    return "Admin sign-in required — open /admin-dashboard and log in.";
+  }
+  if (status === 403) {
+    return "Forbidden — you do not have permission for this action.";
+  }
   if (status === 429) {
     return "GitHub rate limit exceeded. Add a token in Settings and try again.";
   }
@@ -120,12 +174,14 @@ function parseApiError(text: string, status: number, statusText: string): string
   return statusText || `Request failed (${status})`;
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+async function api<T>(path: string, init?: RequestInit & { admin?: boolean }): Promise<T> {
+  const { admin, ...rest } = init ?? {};
   const res = await fetch(path, {
-    ...init,
+    ...rest,
+    credentials: admin ? "include" : rest.credentials,
     headers: {
       "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
+      ...(rest.headers ?? {}),
     },
   });
   if (!res.ok) {
@@ -138,12 +194,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const getSettings = () =>
   api<{
     project_dir: string;
-    github_token_set: boolean;
     db_path: string;
     asset_count: number;
     synced_content_count: number;
     last_synced_at?: string;
     last_sync_status?: string;
+    database?: string;
+    stars_last_refreshed_at?: string | null;
+    stars_live?: boolean;
+    min_repo_stars: number;
   }>("/api/settings");
 
 export type CatalogResponse = {
@@ -173,32 +232,238 @@ export const getCatalog = (params?: {
   return api<CatalogResponse>(`/api/catalog${q ? `?${q}` : ""}`);
 };
 
-export const getAssetDetail = (id: string) =>
-  api<Asset>(`/api/asset?id=${encodeURIComponent(id)}`);
+export const getAssetDetail = (id: string, voterId?: string) => {
+  const sp = new URLSearchParams({ id });
+  if (voterId) sp.set("voter_id", voterId);
+  return api<Asset>(`/api/asset?${sp}`);
+};
 
-export const postSync = (force = false) =>
-  api<{ updated: number; errors: string[]; status: string; stats: CatalogResponse["stats"] }>(
-    "/api/sync",
-    { method: "POST", body: JSON.stringify({ force }) }
+export const postVote = (assetId: string, direction: "up" | "down", voterId: string) =>
+  api<{ upvotes: number; downvotes: number; score: number; user_vote: number }>("/api/vote", {
+    method: "POST",
+    body: JSON.stringify({ asset_id: assetId, direction, voter_id: voterId }),
+  });
+
+export type AdminDashboard = {
+  kpis: {
+    total_assets: number;
+    synced_content: number;
+    sync_coverage_pct: number;
+    unique_repos: number;
+    queue_pending?: number;
+    queue_total?: number;
+    below_min_stars: number;
+    min_repo_stars: number;
+    total_upvotes: number;
+    total_downvotes: number;
+    unique_voters: number;
+    total_vote_records: number;
+    db_size_mb: number;
+  };
+  charts: {
+    by_asset_type: { label: string; value: number }[];
+    by_source_type: { label: string; value: number }[];
+    top_repos: { label: string; assets: number; stars: number }[];
+    top_domains: { label: string; value: number }[];
+    registry_growth: { label: string; value: number }[];
+  };
+  top_voted: {
+    id: string;
+    title: string;
+    install_name: string;
+    source_repo: string;
+    upvotes: number;
+    downvotes: number;
+    score: number;
+  }[];
+  sync_history: {
+    id: number;
+    started_at: string;
+    finished_at: string;
+    status: string;
+    assets_updated: number;
+    error_count: number;
+    message: string;
+  }[];
+  last_sync?: Record<string, unknown>;
+  db_path: string;
+};
+
+export const getAdminSession = () =>
+  api<{
+    authenticated: boolean;
+    github_token_set: boolean;
+    credentials_configured: boolean;
+  }>("/api/admin/auth/session", { admin: true });
+
+export const postAdminLogin = (username: string, password: string) =>
+  api<{ ok: boolean }>("/api/admin/auth/login", {
+    admin: true,
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+
+export const postAdminLogout = () =>
+  api<{ ok: boolean }>("/api/admin/auth/logout", { admin: true, method: "POST" });
+
+export const patchAdminSettings = (body: { admin_github_token?: string | null }) =>
+  api<{ github_token_set: boolean; stars_last_refreshed_at?: string | null }>(
+    "/api/admin/settings",
+    { admin: true, method: "PATCH", body: JSON.stringify(body) }
   );
 
-export const postRegistryExpand = () =>
-  api<{
-    added: number;
-    updated: number;
-    errors: string[];
-    stats: CatalogResponse["stats"];
-  }>("/api/registry/expand", { method: "POST" });
+export type RegistrySetting = {
+  key: string;
+  value: number | string | boolean;
+  value_type: string;
+  description: string;
+  updated_at: string | null;
+  updated_by: string;
+};
+
+export const getRegistrySettings = () =>
+  api<{ settings: RegistrySetting[] }>("/api/admin/settings/registry", { admin: true });
+
+export const patchRegistrySettings = (body: {
+  min_repo_stars?: number;
+  max_files_per_repo_expand?: number;
+  discover_max_per_skills_query?: number;
+  discover_max_per_domain_query?: number;
+}) =>
+  api<{ updated: string[]; settings: RegistrySetting[] }>("/api/admin/settings/registry", {
+    admin: true,
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+export const getAdminUsers = () =>
+  api<{ users: { id: number; username: string; role: string; active: number }[] }>(
+    "/api/admin/users",
+    { admin: true }
+  );
+
+export const postAdminUser = (body: { username: string; password: string; role?: string }) =>
+  api<{ user: Record<string, unknown> }>("/api/admin/users", {
+    admin: true,
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getAdminDashboard = () =>
+  api<AdminDashboard>("/api/admin/dashboard", { admin: true });
+
+export type AdminJobStart = {
+  activity_id: number;
+  status: string;
+  message: string;
+  snapshot_before?: {
+    total_assets: number;
+    unique_repos: number;
+    synced_content: number;
+    captured_at: string;
+  };
+};
+
+export type AdminActivityLogLine = {
+  ts: string;
+  level: string;
+  message: string;
+  kind?: "human" | "dev";
+};
+
+export type AdminActivityRow = {
+  id: number;
+  action: string;
+  detail: string;
+  status: string;
+  created_at: string;
+  progress?: number;
+  step?: string;
+  finished_at?: string;
+  summary?: string;
+  logs?: AdminActivityLogLine[];
+  result?: Record<string, unknown> | null;
+  snapshot_before?: AdminJobStart["snapshot_before"];
+  snapshot_after?: AdminJobStart["snapshot_before"];
+};
+
+export const getAdminActivity = () =>
+  api<{ items: AdminActivityRow[] }>("/api/admin/activity", { admin: true });
+
+export const getAdminActivityRunning = () =>
+  api<{ running: boolean; job: AdminActivityRow | null }>("/api/admin/activity/running", {
+    admin: true,
+  });
+
+export const getAdminActivityDetail = (id: number) =>
+  api<AdminActivityRow>(`/api/admin/activity/${id}`, { admin: true });
+
+export const postAdminActivityCancel = (activityId?: number) =>
+  api<{ ok: boolean; message: string; activity_id?: number; status?: string }>(
+    "/api/admin/activity/cancel",
+    {
+      admin: true,
+      method: "POST",
+      body: JSON.stringify(activityId != null ? { activity_id: activityId } : {}),
+    }
+  );
+
+const jobPost = (path: string, body?: string) =>
+  api<AdminJobStart>(path, { admin: true, method: "POST", ...(body ? { body } : {}) });
+
+export const postAdminRegistryRefresh = () => jobPost("/api/admin/registry/refresh");
+
+export const postAdminRegistryExpand = () => jobPost("/api/admin/registry/expand");
+
+export const postAdminRegistryDedupe = () => jobPost("/api/admin/registry/dedupe");
+
+export const postAdminRegistryReclassify = () => jobPost("/api/admin/registry/reclassify");
+
+export const postAdminRegistryPrune = () => jobPost("/api/admin/registry/prune");
+
+export const postAdminRegistrySync = (force = false) =>
+  jobPost("/api/admin/registry/sync", JSON.stringify({ force }));
+
+export const postAdminRefreshStars = () => jobPost("/api/admin/registry/refresh-stars");
+
+export const postCustomRepoImport = (repo_url: string) =>
+  api<{ added: number; owner: string; repo: string }>("/api/admin/registry/custom", {
+    admin: true,
+    method: "POST",
+    body: JSON.stringify({ repo_url }),
+  });
+
+/** Public: sync file content from GitHub into harbor.db */
+export const postSync = (force = false) =>
+  api<{ updated: number; errors: string[]; status: string }>("/api/sync", {
+    method: "POST",
+    body: JSON.stringify({ force }),
+  });
+
+export const postRegistryExpand = () => postAdminRegistryExpand();
 
 export const getSyncStatus = () =>
   api<{ last_sync: Record<string, unknown>; stats: CatalogResponse["stats"] }>("/api/sync/status");
 
-export const patchSettings = (body: {
-  project_dir?: string;
-  github_token?: string;
-}) => api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
+export const patchSettings = (body: { project_dir?: string }) =>
+  api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
 
 export const getConnection = () => api<ConnectionInfo>("/api/connection");
+
+export const getInstalledUpdates = () =>
+  api<{ updates: InstalledUpdate[]; count: number }>("/api/installed/updates");
+
+export const postAdminRegistryEvolve = (force = false) =>
+  jobPost(`/api/admin/registry/evolve${force ? "?force=true" : ""}`);
+
+export const postAdminRegistryDiscover = (force = false) =>
+  jobPost(`/api/admin/registry/discover${force ? "?force=true" : ""}`);
+
+export const postAdminRegistryCrawlBatch = (force = false) =>
+  jobPost(`/api/admin/registry/crawl-batch${force ? "?force=true" : ""}`);
+
+export const getAdminRegistryQueue = () =>
+  api<{ queue: Record<string, number> }>("/api/admin/registry/queue", { admin: true });
 
 export const getCategories = () => api<CategoriesResponse>("/api/categories");
 

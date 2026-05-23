@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from studio import scraper_bridge, taxonomy
+from studio.app_settings import get_min_repo_stars
 from studio.database import get_connection, row_to_dict
+from studio.github_urls import blob_url, repo_url
+from studio.policy import SOURCE_CUSTOM, SOURCE_DISCOVERED, SOURCE_MANIFEST
 
 PERIOD_MS = {
     "day": 86400000,
@@ -65,10 +68,8 @@ class CatalogService:
             rank = int(entry.get("rank") or 99)
             asset_type = entry.get("asset_type") or taxonomy.detect_asset_type(path)
             domain = category
-            from studio.leaderboards import CURATED_CATEGORY_TO_DOMAIN
-
-            domain = CURATED_CATEGORY_TO_DOMAIN.get(category, category)
-            domains = taxonomy.classify_domains("", path, category)
+            classified = taxonomy.classify_asset("", path, category)
+            tech = taxonomy.classify_tech_tags("", path)
 
             row = {
                 "id": aid,
@@ -91,23 +92,61 @@ class CatalogService:
                 "repo_pushed_at": "",
                 "synced_at": "",
                 "notes": entry.get("notes") or "",
+                "source_type": SOURCE_MANIFEST,
+                "primary_domain": classified.primary_domain,
             }
-            self.upsert_asset(row, domains)
+            self.upsert_asset(
+                row,
+                primary_domain=classified.primary_domain,
+                secondary_domains=classified.secondary_domains,
+                tech_tags=tech,
+            )
             n += 1
         return n
 
-    def upsert_asset(self, row: dict[str, Any], domains: list[str] | None = None) -> None:
+    def upsert_asset(
+        self,
+        row: dict[str, Any],
+        domains: list[str] | None = None,
+        *,
+        primary_domain: str | None = None,
+        secondary_domains: list[str] | None = None,
+        tech_tags: list[str] | None = None,
+    ) -> None:
+        row.setdefault("source_type", SOURCE_DISCOVERED)
+        if primary_domain is None and domains:
+            primary_domain = taxonomy.normalize_domain(domains[0])
+            secondary_domains = [
+                taxonomy.normalize_domain(d)
+                for d in domains[1:3]
+                if taxonomy.normalize_domain(d) != primary_domain
+            ]
+        elif primary_domain is None:
+            text = row.get("content_preview") or row.get("content") or ""
+            path = row.get("path", "")
+            cat = row.get("category") or None
+            classified = taxonomy.classify_asset(text, path, cat)
+            primary_domain = classified.primary_domain
+            secondary_domains = classified.secondary_domains
+            if tech_tags is None:
+                tech_tags = taxonomy.classify_tech_tags(text, path)
+
+        row["primary_domain"] = primary_domain or "docs-workflow"
+        secondary_domains = secondary_domains or []
+
         with get_connection() as conn:
             conn.execute(
                 """
                 INSERT INTO assets (
                     id, owner, repo, path, source_repo, title, install_name, asset_type,
                     category, rank, stars, score, content_sha256, content, content_preview,
-                    raw_url, branch, repo_pushed_at, synced_at, notes
+                    raw_url, branch, repo_pushed_at, synced_at, notes, source_type,
+                    primary_domain
                 ) VALUES (
                     :id, :owner, :repo, :path, :source_repo, :title, :install_name, :asset_type,
                     :category, :rank, :stars, :score, :content_sha256, :content, :content_preview,
-                    :raw_url, :branch, :repo_pushed_at, :synced_at, :notes
+                    :raw_url, :branch, :repo_pushed_at, :synced_at, :notes, :source_type,
+                    :primary_domain
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
@@ -124,55 +163,118 @@ class CatalogService:
                     branch=excluded.branch,
                     repo_pushed_at=excluded.repo_pushed_at,
                     synced_at=excluded.synced_at,
-                    notes=excluded.notes
+                    notes=excluded.notes,
+                    primary_domain=excluded.primary_domain,
+                    source_type=CASE
+                        WHEN assets.source_type = 'custom' THEN assets.source_type
+                        ELSE excluded.source_type
+                    END
                 """,
                 row,
             )
-            if domains:
-                conn.execute("DELETE FROM asset_domains WHERE asset_id = ?", (row["id"],))
-                for d in domains:
+            aid = row["id"]
+            conn.execute("DELETE FROM asset_domains WHERE asset_id = ?", (aid,))
+            for d in secondary_domains:
+                conn.execute(
+                    "INSERT OR IGNORE INTO asset_domains (asset_id, domain) VALUES (?, ?)",
+                    (aid, d),
+                )
+            if tech_tags is not None:
+                conn.execute("DELETE FROM asset_tech_tags WHERE asset_id = ?", (aid,))
+                for tag in tech_tags:
                     conn.execute(
-                        "INSERT OR IGNORE INTO asset_domains (asset_id, domain) VALUES (?, ?)",
-                        (row["id"], d),
+                        "INSERT OR IGNORE INTO asset_tech_tags (asset_id, tag) VALUES (?, ?)",
+                        (aid, tag),
                     )
+            conn.commit()
+
+    def upsert_classification(
+        self,
+        asset_id: str,
+        primary_domain: str,
+        secondary_domains: list[str],
+        tech_tags: list[str],
+    ) -> None:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE assets SET primary_domain = ? WHERE id = ?",
+                (primary_domain, asset_id),
+            )
+            conn.execute("DELETE FROM asset_domains WHERE asset_id = ?", (asset_id,))
+            for d in secondary_domains:
+                conn.execute(
+                    "INSERT OR IGNORE INTO asset_domains (asset_id, domain) VALUES (?, ?)",
+                    (asset_id, d),
+                )
+            conn.execute("DELETE FROM asset_tech_tags WHERE asset_id = ?", (asset_id,))
+            for tag in tech_tags:
+                conn.execute(
+                    "INSERT OR IGNORE INTO asset_tech_tags (asset_id, tag) VALUES (?, ?)",
+                    (asset_id, tag),
+                )
             conn.commit()
 
     def list_assets(
         self,
         *,
         domain: str | None = None,
+        tech_tag: str | None = None,
         asset_type: str | None = None,
         q: str | None = None,
         period: str = "all",
-        limit: int = 200,
+        limit: int = 500,
         offset: int = 0,
+        include_all: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         clauses: list[str] = []
         params: list[Any] = []
 
+        if not include_all:
+            clauses.append(f"(a.stars >= ? OR a.source_type = ?)")
+            params.extend([get_min_repo_stars(), SOURCE_CUSTOM])
+
         if domain:
+            dom = taxonomy.normalize_domain(domain)
             clauses.append(
-                "EXISTS (SELECT 1 FROM asset_domains d WHERE d.asset_id = a.id AND d.domain = ?)"
+                "(a.primary_domain = ? OR EXISTS ("
+                "SELECT 1 FROM asset_domains d WHERE d.asset_id = a.id AND d.domain = ?))"
             )
-            params.append(domain)
+            params.extend([dom, dom])
+
+        if tech_tag:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM asset_tech_tags t WHERE t.asset_id = a.id AND t.tag = ?)"
+            )
+            params.append(tech_tag)
 
         if asset_type and asset_type != "all":
             clauses.append("a.asset_type = ?")
             params.append(asset_type)
 
         if q:
+            q_norm = q.strip()
+            like = f"%{q_norm}%"
+            repo_like = like
+            if "github.com/" in q_norm.lower():
+                tail = q_norm.lower().split("github.com/")[-1].strip("/")
+                parts = tail.split("/")
+                if len(parts) >= 2:
+                    repo_like = f"%{parts[0]}/{parts[1]}%"
             clauses.append(
-                "(a.title LIKE ? OR a.install_name LIKE ? OR a.source_repo LIKE ? OR a.content_preview LIKE ?)"
+                "(a.title LIKE ? OR a.install_name LIKE ? OR a.source_repo LIKE ? "
+                "OR a.path LIKE ? OR a.content_preview LIKE ? OR a.raw_url LIKE ? OR a.id LIKE ?)"
             )
-            like = f"%{q}%"
-            params.extend([like, like, like, like])
+            params.extend([like, like, repo_like, like, like, like, like])
 
         if period != "all" and PERIOD_MS.get(period):
             # filter by repo_pushed_at ISO string — approximate via datetime
             clauses.append("a.repo_pushed_at != ''")
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        sql = f"SELECT a.* FROM assets a {where} ORDER BY a.stars DESC, a.title COLLATE NOCASE"
+        sql = (
+            f"SELECT a.* FROM assets a {where} "
+            "ORDER BY (a.upvotes - a.downvotes) DESC, a.stars DESC, a.title COLLATE NOCASE"
+        )
 
         with get_connection() as conn:
             total = conn.execute(
@@ -193,15 +295,7 @@ class CatalogService:
             row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
             if not row:
                 return None
-            domains = [
-                r[0]
-                for r in conn.execute(
-                    "SELECT domain FROM asset_domains WHERE asset_id = ?", (asset_id,)
-                ).fetchall()
-            ]
         api = self._row_to_api(row)
-        api["domains"] = domains
-        api["categories"] = domains
         return api
 
     def trending(self, period: str = "week", limit: int = 20) -> list[dict[str, Any]]:
@@ -226,6 +320,40 @@ class CatalogService:
                 )
         return out
 
+    def list_repo_owners(self, *, include_all: bool = False) -> list[dict[str, Any]]:
+        """Distinct GitHub owners in the registry (for Browse author filter)."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if not include_all:
+            clauses.append("(stars >= ? OR source_type = ?)")
+            params.extend([get_min_repo_stars(), SOURCE_CUSTOM])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"""
+            SELECT
+              CASE
+                WHEN instr(source_repo, '/') > 0
+                THEN substr(source_repo, 1, instr(source_repo, '/') - 1)
+                ELSE source_repo
+              END AS owner,
+              COUNT(*) AS asset_count,
+              COUNT(DISTINCT source_repo) AS repo_count
+            FROM assets
+            {where}
+            GROUP BY owner
+            HAVING owner != ''
+            ORDER BY owner COLLATE NOCASE
+        """
+        with get_connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "owner": r["owner"],
+                "asset_count": int(r["asset_count"]),
+                "repo_count": int(r["repo_count"]),
+            }
+            for r in rows
+        ]
+
     def stats(self) -> dict[str, Any]:
         with get_connection() as conn:
             total = conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
@@ -244,35 +372,61 @@ class CatalogService:
     def _row_to_api(self, row: Any) -> dict[str, Any]:
         d = row_to_dict(row) or {}
         aid = d.get("id", "")
+        source_repo = d.get("source_repo", "")
+        path = d.get("path", "")
+        branch = d.get("branch") or "main"
+        primary = taxonomy.normalize_domain(
+            d.get("primary_domain") or d.get("category") or "docs-workflow"
+        )
         with get_connection() as conn:
-            domains = [
+            secondary = [
                 r[0]
                 for r in conn.execute(
                     "SELECT domain FROM asset_domains WHERE asset_id = ?", (aid,)
                 ).fetchall()
             ]
+            tech_tags = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT tag FROM asset_tech_tags WHERE asset_id = ? ORDER BY tag",
+                    (aid,),
+                ).fetchall()
+            ]
+        domains = [primary, *[s for s in secondary if s != primary]]
+        gh_blob = blob_url(source_repo, branch, path) if source_repo and path else ""
+        gh_repo = repo_url(source_repo) if source_repo else ""
         return {
             "id": aid,
-            "source_repo": d.get("source_repo", ""),
-            "source_path": d.get("path", ""),
+            "source_repo": source_repo,
+            "source_path": path,
             "asset_type": d.get("asset_type", "skill"),
             "asset_type_label": taxonomy.ASSET_TYPE_LABELS.get(
                 d.get("asset_type", "skill"), d.get("asset_type", "skill")
             ),
-            "categories": domains or [d.get("category", "")],
-            "domains": domains or [d.get("category", "")],
+            "primary_domain": primary,
+            "secondary_domains": secondary,
+            "categories": domains,
+            "domains": domains,
+            "tech_tags": tech_tags,
             "score": d.get("score", 0),
             "stars": d.get("stars", 0),
             "content_preview": d.get("content_preview", ""),
             "content": d.get("content", ""),
             "install_name": d.get("install_name", ""),
             "raw_url": d.get("raw_url", ""),
+            "branch": branch,
+            "github_blob_url": gh_blob,
+            "github_repo_url": gh_repo,
             "curated": True,
             "curated_rank": d.get("rank", 99),
             "curated_title": d.get("title", ""),
             "repo_pushed_at": d.get("repo_pushed_at", ""),
             "synced_at": d.get("synced_at", ""),
             "notes": d.get("notes", ""),
+            "source_type": d.get("source_type", SOURCE_DISCOVERED),
+            "upvotes": d.get("upvotes", 0),
+            "downvotes": d.get("downvotes", 0),
+            "vote_score": int(d.get("upvotes", 0)) - int(d.get("downvotes", 0)),
         }
 
     def _to_leaderboard_entry(self, a: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
@@ -285,7 +439,7 @@ class CatalogService:
             "title": a.get("curated_title") or a.get("install_name", ""),
             "install_folder": a.get("install_name", ""),
             "category": a.get("categories", [""])[0] if a.get("categories") else "",
-            "domain": a.get("domains", [""])[0] if a.get("domains") else "",
+            "domain": a.get("primary_domain") or (a.get("domains", [""])[0] if a.get("domains") else ""),
             "rank": rank if rank is not None else a.get("curated_rank", 99),
             "owner": owner,
             "repo": repo,

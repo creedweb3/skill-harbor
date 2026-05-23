@@ -59,11 +59,16 @@ def list_categories() -> list[str]:
 
 
 def list_category_meta() -> dict[str, Any]:
+    from studio.catalog import CatalogService
+
+    owners = CatalogService().list_repo_owners()
     return {
         "groups": taxonomy.CATEGORY_GROUPS,
         "categories": list_categories(),
         "discovery_professions": taxonomy.DISCOVERY_PROFESSIONS,
         "domain_labels": taxonomy.DOMAIN_LABELS,
+        "tech_stack_labels": taxonomy.TECH_STACK_LABELS,
+        "repo_owners": owners,
         "curated_help": (
             "Curated = hand-picked from the community manifest (cursor-curated-skills.json), "
             "vetted for quality — not random GitHub search results."
@@ -79,12 +84,16 @@ def enrich_assets(assets: list[scraper.Asset], project_dir: Path) -> list[dict[s
     out: list[dict[str, Any]] = []
     for asset in assets:
         text = getattr(asset, "_content", None) or asset.content_preview
-        domains = taxonomy.classify_domains(
+        classified = taxonomy.classify_asset(
             text,
             asset.source_path,
             asset.categories[0] if asset.categories else None,
         )
+        domains = [classified.primary_domain, *classified.secondary_domains]
+        tech = taxonomy.classify_tech_tags(text, asset.source_path)
         setattr(asset, "_domains", domains)
+        setattr(asset, "_primary_domain", classified.primary_domain)
+        setattr(asset, "_tech_tags", tech)
         asset_type = taxonomy.detect_asset_type(asset.source_path)
         if asset.asset_type != asset_type:
             asset.asset_type = asset_type
@@ -99,6 +108,9 @@ def enrich_assets(assets: list[scraper.Asset], project_dir: Path) -> list[dict[s
         setattr(asset, "_install_status", inst)
         d = asset_to_dict(asset)
         d["domains"] = domains
+        d["primary_domain"] = classified.primary_domain
+        d["secondary_domains"] = classified.secondary_domains
+        d["tech_tags"] = tech
         d["install_status"] = inst
         d["asset_type_label"] = taxonomy.ASSET_TYPE_LABELS.get(asset_type, asset_type)
         out.append(d)

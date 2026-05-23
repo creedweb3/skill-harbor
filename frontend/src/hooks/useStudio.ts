@@ -20,11 +20,11 @@ import {
 import type { InstalledRow } from "../lib/installedGroups";
 
 const DEFAULT_CATS = [
-  "web-development",
-  "full-stack",
-  "marketing-seo",
-  "product-design",
   "agent-ai",
+  "web-frameworks",
+  "backend-apis",
+  "growth-seo",
+  "design-ux",
 ];
 
 export type LogKind = "info" | "ok" | "err";
@@ -45,12 +45,15 @@ export function useStudio() {
   >([]);
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [curatedHelp, setCuratedHelp] = useState("");
+  const [domainLabels, setDomainLabels] = useState<Record<string, string>>({});
+  const [techStackLabels, setTechStackLabels] = useState<Record<string, string>>({});
+  const [repoOwners, setRepoOwners] = useState<
+    { owner: string; asset_count: number; repo_count: number }[]
+  >([]);
   const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(DEFAULT_CATS));
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [projectDir, setProjectDir] = useState("");
-  const [tokenInput, setTokenInput] = useState("");
-  const [tokenSet, setTokenSet] = useState(false);
   const [installUser, setInstallUser] = useState(true);
   const [installProject, setInstallProject] = useState(false);
   const [force, setForce] = useState(false);
@@ -73,6 +76,8 @@ export function useStudio() {
     asset_count: number;
     synced_content_count: number;
     last_synced_at?: string;
+    stars_last_refreshed_at?: string | null;
+    stars_live?: boolean;
   } | null>(null);
 
   const pushLog = useCallback((line: string, kind: LogKind = "info") => {
@@ -91,16 +96,20 @@ export function useStudio() {
           getLeaderboards(),
         ]);
         setProjectDir(settings.project_dir);
-        setTokenSet(settings.github_token_set);
         setDbStats({
           asset_count: settings.asset_count,
           synced_content_count: settings.synced_content_count,
           last_synced_at: settings.last_synced_at,
+          stars_last_refreshed_at: settings.stars_last_refreshed_at,
+          stars_live: settings.stars_live,
         });
         setConnection(conn);
         setAllCategories(cats.categories);
         setCategoryGroups(cats.groups);
       setDiscoveryProfessions(cats.discovery_professions ?? []);
+        setDomainLabels(cats.domain_labels ?? {});
+        setTechStackLabels(cats.tech_stack_labels ?? {});
+        setRepoOwners(cats.repo_owners ?? []);
         setCuratedHelp(cats.curated_help);
         setLeaderboards(boards);
         setBackendReady(true);
@@ -132,7 +141,7 @@ export function useStudio() {
         if (!cancelled && i > 0) pushLog("Connected to API", "ok");
         if (!cancelled) {
           try {
-            const cat = await getCatalog({ limit: 500 });
+            const cat = await getCatalog({ limit: 5000 });
             setAssets(cat.assets);
           } catch {
             /* catalog loads on next refresh */
@@ -169,7 +178,7 @@ export function useStudio() {
 
   const loadCatalog = useCallback(async () => {
     try {
-      const result = await getCatalog({ limit: 500 });
+      const result = await getCatalog({ limit: 5000 });
       setAssets(result.assets);
       setDbStats({
         asset_count: result.stats.total_assets,
@@ -235,26 +244,8 @@ export function useStudio() {
     try {
       await patchSettings({
         project_dir: projectDir || undefined,
-        github_token: tokenInput || undefined,
       });
-      setTokenInput("");
       pushLog("Settings saved", "ok");
-      await refresh();
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clearGithubToken = async () => {
-    if (!tokenSet && !tokenInput) return;
-    if (!confirm("Remove saved GitHub token from this machine?")) return;
-    setBusy(true);
-    try {
-      await patchSettings({ github_token: "" });
-      setTokenInput("");
-      pushLog("GitHub token removed", "ok");
       await refresh();
     } catch (e) {
       pushLog(String(e), "err");
@@ -358,14 +349,31 @@ export function useStudio() {
       list = list.filter((a) => a.install_status?.status === "none");
     }
     if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (a) =>
-          a.curated_title?.toLowerCase().includes(q) ||
-          a.install_name.toLowerCase().includes(q) ||
-          a.source_repo.toLowerCase().includes(q) ||
-          a.content_preview.toLowerCase().includes(q)
-      );
+      const q = search.toLowerCase().trim();
+      const ghMatch = q.match(/github\.com[/:]([^/]+)\/([^/?.#\s]+)/);
+      list = list.filter((a) => {
+        const owner = a.source_repo.split("/")[0]?.toLowerCase() ?? "";
+        const hay = [
+          a.curated_title,
+          a.install_name,
+          a.source_repo,
+          owner,
+          a.source_path,
+          a.content_preview,
+          a.raw_url,
+          a.id,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (hay.includes(q)) return true;
+        if (owner === q || owner.startsWith(q)) return true;
+        if (ghMatch) {
+          const repo = `${ghMatch[1]}/${ghMatch[2].replace(/\.git$/, "")}`;
+          return a.source_repo.toLowerCase().includes(repo);
+        }
+        return false;
+      });
     }
     return list;
   }, [assets, selectedCats, typeFilter, hideInstalled, search]);
@@ -382,6 +390,19 @@ export function useStudio() {
         visibleIds.forEach((id) => next.delete(id));
       } else {
         visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllForIds = (ids: string[]) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      if (allSelected) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
       }
       return next;
     });
@@ -431,15 +452,15 @@ export function useStudio() {
     connection,
     categoryGroups,
     discoveryProfessions,
+    domainLabels,
+    techStackLabels,
+    repoOwners,
     curatedHelp,
     selectedCats,
     assets,
     selectedIds,
     projectDir,
     setProjectDir,
-    tokenInput,
-    setTokenInput,
-    tokenSet,
     installUser,
     setInstallUser,
     installProject,
@@ -469,7 +490,6 @@ export function useStudio() {
     leaderboardTab,
     setLeaderboardTab,
     focusLeaderboardEntry,
-    clearGithubToken,
     filteredAssets,
     installedItems,
     hasCatalog,
@@ -495,6 +515,7 @@ export function useStudio() {
     pushLog,
     setBusy,
     toggleSelectAllVisible,
+    toggleSelectAllForIds,
     deselectAll,
     toggleRow,
   };

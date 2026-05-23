@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
 from studio import config
+from studio.db_config import resolve_sqlite_path
+from studio.migrate import run_migrations
 
-DB_PATH = config.STUDIO_DIR / "harbor.db"
+_schema_lock = threading.Lock()
+_schema_initialized = False
+
+
+def get_db_path() -> Path:
+    return resolve_sqlite_path()
+
+
+# Backward-compatible module attribute (resolved at import; restart after URL change)
+DB_PATH = get_db_path()
+
+
+def get_min_repo_stars() -> int:
+    from studio.app_settings import get_min_repo_stars as _g
+
+    return _g()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -33,6 +51,9 @@ CREATE TABLE IF NOT EXISTS assets (
     repo_pushed_at TEXT NOT NULL DEFAULT '',
     synced_at TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
+    source_type TEXT NOT NULL DEFAULT 'discovered',
+    upvotes INTEGER NOT NULL DEFAULT 0,
+    downvotes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -41,6 +62,16 @@ CREATE TABLE IF NOT EXISTS asset_domains (
     domain TEXT NOT NULL,
     PRIMARY KEY (asset_id, domain),
     FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS asset_votes (
+    asset_id TEXT NOT NULL,
+    voter_id TEXT NOT NULL,
+    vote INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (asset_id, voter_id),
+    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
+    CHECK (vote IN (-1, 1))
 );
 
 CREATE TABLE IF NOT EXISTS sync_runs (
@@ -63,15 +94,41 @@ CREATE INDEX IF NOT EXISTS idx_asset_domains_domain ON asset_domains(domain);
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     conn.commit()
+    run_migrations(conn)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_source ON assets(source_type)")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def configure_sqlite(conn: sqlite3.Connection) -> None:
+    """Per-connection pragmas — WAL allows API reads during registry job writes."""
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Run DDL/migrations once per process (not on every HTTP poll or log line)."""
+    global _schema_initialized
+    if _schema_initialized:
+        return
+    with _schema_lock:
+        if _schema_initialized:
+            return
+        init_schema(conn)
+        _schema_initialized = True
 
 
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
     config.STUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(get_db_path(), check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    init_schema(conn)
+    configure_sqlite(conn)
+    ensure_schema(conn)
     try:
         yield conn
     finally:

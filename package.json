@@ -4,9 +4,11 @@
   "private": true,
   "description": "Skill Harbor — marketplace for Cursor agent skills, rules, commands, and subagents",
   "scripts": {
-    "dev": "concurrently -n api,ui -c blue,green \"npm run dev:api\" \"npm run dev:ui\"",
-    "dev:api": "cd backend && python -m uvicorn main:app --reload --host 127.0.0.1 --port 8765",
+    "predev": "node scripts/free-ports.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "node scripts/free-ports.mjs && python scripts/dev-api.py",
     "dev:ui": "cd frontend && npm run dev",
+    "dev:concurrent": "concurrently -n api,ui -c blue,green \"npm run dev:api\" \"npm run dev:ui\"",
     "install:all": "cd frontend && npm install && cd ../backend && pip install -r requirements.txt",
     "build:ui": "cd frontend && npm run build"
   },

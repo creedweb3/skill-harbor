@@ -83,9 +83,9 @@ export function AssetInspector({ studio }: Props) {
         >
           Install
         </button>
-        {asset?.raw_url ? (
+        {asset?.github_blob_url || asset?.raw_url ? (
           <a
-            href={asset.raw_url}
+            href={asset.github_blob_url || asset.raw_url}
             target="_blank"
             rel="noreferrer"
             className="harbor-btn harbor-btn--ghost"

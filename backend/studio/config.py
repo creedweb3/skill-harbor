@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -61,3 +63,74 @@ def set_github_token(token: str | None) -> None:
     else:
         cfg.pop("github_token", None)
     save_config(cfg)
+
+
+def get_admin_github_token() -> str | None:
+    cfg = load_config()
+    token = (
+        cfg.get("admin_github_token")
+        or os.environ.get("SKILL_HARBOR_ADMIN_TOKEN")
+        or os.environ.get("SKILL_HARBOR_ADMIN_GITHUB_TOKEN")
+    )
+    return token or None
+
+
+def set_admin_github_token(token: str | None) -> None:
+    cfg = load_config()
+    if token:
+        cfg["admin_github_token"] = token.strip()
+    else:
+        cfg.pop("admin_github_token", None)
+    save_config(cfg)
+
+
+def get_admin_username() -> str:
+    return (
+        os.environ.get("SKILL_HARBOR_ADMIN_USER")
+        or load_config().get("admin_username")
+        or "admin"
+    )
+
+
+def get_admin_password_salt() -> str:
+    cfg = load_config()
+    salt = cfg.get("admin_password_salt")
+    if not salt:
+        salt = os.urandom(16).hex()
+        cfg["admin_password_salt"] = salt
+        save_config(cfg)
+    return str(salt)
+
+
+def set_admin_password(password: str) -> None:
+    cfg = load_config()
+    get_admin_password_salt()
+    cfg["admin_password_hash"] = hashlib.sha256(
+        f"{cfg['admin_password_salt']}:{password}".encode("utf-8")
+    ).hexdigest()
+    save_config(cfg)
+
+
+def get_last_stars_refresh() -> float | None:
+    raw = load_config().get("stars_last_refreshed_at")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def set_last_stars_refresh(ts: float | None = None) -> None:
+    cfg = load_config()
+    cfg["stars_last_refreshed_at"] = ts if ts is not None else time.time()
+    save_config(cfg)
+
+
+def get_last_stars_refresh_iso() -> str | None:
+    ts = get_last_stars_refresh()
+    if not ts:
+        return None
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
