@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Asset } from "../../api";
 import { formatStars } from "../../lib/format";
 import { assetTypeBadgeClass, formatSourceRepo } from "../../lib/assetType";
@@ -13,7 +14,7 @@ type Props = {
   onToggleCheck?: () => void;
 };
 
-export function AssetRankCard({
+export const AssetRankCard = memo(function AssetRankCard({
   asset,
   selected,
   onSelect,
@@ -64,4 +65,4 @@ export function AssetRankCard({
       {!hasContent ? <span className="asset-card-warn">Sync for content</span> : null}
     </article>
   );
-}
+});

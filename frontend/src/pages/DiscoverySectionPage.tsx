@@ -4,6 +4,10 @@ import { AssetRankCard } from "../components/dashboard/AssetRankCard";
 import { RepoTrendCard } from "../components/dashboard/RepoTrendCard";
 import { MiniBarChart, MiniGrowthChart } from "../components/charts/MiniCharts";
 import { TrendPeriodSwitch } from "../components/discover/TrendPeriodSwitch";
+import { HarborEmpty } from "../components/ui/HarborEmpty";
+import { SectionBar } from "../components/discover/SectionBar";
+import { SelectionPill } from "../components/ui/SelectionPill";
+import { TextAction } from "../components/ui/TextAction";
 import {
   assetsForSectionView,
   buildCategoryAnalytics,
@@ -21,9 +25,15 @@ type Props = {
   studio: Studio;
   view: DiscoverySectionView;
   onBack: () => void;
+  backLabel?: string;
 };
 
-export function DiscoverySectionPage({ studio, view, onBack }: Props) {
+export function DiscoverySectionPage({
+  studio,
+  view,
+  onBack,
+  backLabel = "Discovery",
+}: Props) {
   const {
     assets,
     installedItems,
@@ -85,13 +95,17 @@ export function DiscoverySectionPage({ studio, view, onBack }: Props) {
       ? "GitHub Trending"
       : view.kind === "for_you"
         ? "Personalized"
-        : "Category";
+        : "Domain";
 
   return (
     <div className="harbor-page discovery-page discovery-section-page">
       <header className="discovery-detail-head">
-        <button type="button" className="discovery-detail-back harbor-btn harbor-btn--ghost harbor-btn--sm" onClick={onBack}>
-          ← Discovery
+        <button
+          type="button"
+          className="discovery-detail-back harbor-text-action"
+          onClick={onBack}
+        >
+          ← {backLabel}
         </button>
         <div className="discovery-detail-head__main">
           <span className="harbor-badge harbor-badge--section">{badge}</span>
@@ -119,38 +133,44 @@ export function DiscoverySectionPage({ studio, view, onBack }: Props) {
         </article>
       </section>
 
-      <div className="discovery-section-toolbar">
-        <div className="discovery-section-toolbar__left">
-          <select
-            className="discovery-section-toolbar__sort"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as CategorySortKey)}
-            aria-label="Sort category assets"
-          >
-            {CATEGORY_SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                Sort: {opt.label}
-              </option>
-            ))}
-          </select>
-          {view.kind === "trending" ? (
-            <TrendPeriodSwitch period={trendPeriod} onChange={setTrendPeriod} hasLiveData={hasCatalog} />
-          ) : null}
-          <button
-            type="button"
-            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-            onClick={() => toggleSelectAllForIds(pageIds)}
-            disabled={pageItems.length === 0}
-          >
-            {allPageSelected ? "Deselect page" : "Select page"}
-          </button>
-        </div>
-        <span className="discovery-section-toolbar__count">
-          {sorted.length === 0
+      <SectionBar
+        sticky
+        start={
+          <>
+            <select
+              className="section-bar__select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as CategorySortKey)}
+              aria-label="Sort category assets"
+            >
+              {CATEGORY_SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {view.kind === "trending" ? (
+              <TrendPeriodSwitch
+                period={trendPeriod}
+                onChange={setTrendPeriod}
+                hasLiveData={hasCatalog}
+              />
+            ) : null}
+            <SelectionPill
+              pressed={allPageSelected}
+              onClick={() => toggleSelectAllForIds(pageIds)}
+              disabled={pageItems.length === 0}
+            >
+              {allPageSelected ? "Deselect page" : "Select page"}
+            </SelectionPill>
+          </>
+        }
+        meta={
+          sorted.length === 0
             ? "0 assets"
-            : `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${sorted.length.toLocaleString()}`}
-        </span>
-      </div>
+            : `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${sorted.length.toLocaleString()}`
+        }
+      />
 
       {view.kind === "trending" && sortBy === "stars" && repoTrends.length > 0 ? (
         <div className="harbor-card-grid harbor-card-grid--row discovery-detail-repos">
@@ -184,7 +204,10 @@ export function DiscoverySectionPage({ studio, view, onBack }: Props) {
       </div>
 
       {sorted.length === 0 ? (
-        <p className="discovery-empty-hint muted">No assets in this section yet.</p>
+        <HarborEmpty
+          title="No assets in this domain"
+          description="Run Sync registry from the top bar, or check back after the next crawl."
+        />
       ) : null}
 
       {sorted.length > PAGE_SIZE ? (

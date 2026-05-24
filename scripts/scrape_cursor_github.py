@@ -488,6 +488,13 @@ def classify_text(text: str, path: str = "") -> tuple[list[str], float]:
 
 
 def is_candidate_path(path: str) -> str | None:
+    try:
+        from studio.path_filters import classify_candidate_path
+
+        return classify_candidate_path(path)
+    except ImportError:
+        pass
+
     lower = path.replace("\\", "/").lower()
     normalized = f"/{lower.strip('/')}/"
     name = Path(path).name
@@ -746,12 +753,25 @@ def fetch_curated_assets(
 
 
 def merge_and_dedupe_assets(assets: list[Asset]) -> list[Asset]:
-    """Prefer curated entries; dedupe by content hash."""
+    """Prefer curated entries; dedupe by content hash (skip empty/short hashes)."""
     by_hash: dict[str, Asset] = {}
+    unhashed: list[Asset] = []
+    min_len = 12
+    try:
+        from studio.path_filters import MIN_CONTENT_HASH_LEN
+
+        min_len = MIN_CONTENT_HASH_LEN
+    except ImportError:
+        pass
+
     for a in sorted(assets, key=lambda x: (0 if x.curated else 1, x.curated_rank or 99)):
-        if a.content_sha256 not in by_hash:
-            by_hash[a.content_sha256] = a
-    return list(by_hash.values())
+        h = (a.content_sha256 or "").strip()
+        if len(h) < min_len:
+            unhashed.append(a)
+            continue
+        if h not in by_hash:
+            by_hash[h] = a
+    return list(by_hash.values()) + unhashed
 
 
 def discover_repos(

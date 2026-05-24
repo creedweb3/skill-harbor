@@ -1,3 +1,10 @@
+"""Bridge Harbor backend to scripts/scrape_cursor_github.py.
+
+Crawl path filtering uses studio.path_filters (allowlisted skill dirs; skips
+node_modules, vendor, dist). Registry dedupe merges identical content hashes
+via studio.dedupe, preferring manifest/custom rows and clean skill paths.
+"""
+
 from __future__ import annotations
 
 import sys
@@ -16,7 +23,7 @@ import scrape_cursor_github as scraper  # noqa: E402
 from studio import installed, platform_paths, stars_cache, taxonomy  # noqa: E402
 from studio.install_cache import get_install_index  # noqa: E402
 from studio.platforms import DEFAULT_PLATFORM_ID, get_platform  # noqa: E402
-from studio.platform_write import write_asset_for_platform
+from studio.platform_write import plan_install_write, write_asset_for_platform
 
 CURATED_PATH = _SCRIPTS / "cursor-curated-skills.json"
 CURATED_RULES_PATH = _SCRIPTS / "cursor-curated-rules.json"
@@ -275,7 +282,8 @@ def _install_to_platform(
     force: bool,
     platform_id: str,
     report: scraper.ScrapeReport,
-) -> dict[str, list[str]]:
+    dry_run: bool = False,
+) -> dict[str, list[str]] | dict[str, Any]:
     from studio.platform_compat import detect_platforms
     from studio.safety import require_safe_for_install
 
@@ -290,6 +298,7 @@ def _install_to_platform(
         project_dir=project_dir,
     )
     installed: dict[str, list[str]] = {"user": [], "project": []}
+    preview_items: list[dict[str, Any]] = []
 
     for asset in assets:
         compatible = detect_platforms(asset.source_path, asset.asset_type)
@@ -319,12 +328,19 @@ def _install_to_platform(
             continue
         for scope, base in bases:
             try:
-                dest = write_asset_for_platform(asset, text, base, force, platform_id)
-                if dest:
-                    installed[scope].append(str(dest))
+                if dry_run:
+                    plan = plan_install_write(asset, text, base, force, platform_id)
+                    if plan:
+                        preview_items.append({**plan, "scope": scope, "asset_id": asset_id(asset)})
+                else:
+                    dest = write_asset_for_platform(asset, text, base, force, platform_id)
+                    if dest:
+                        installed[scope].append(str(dest))
             except Exception as e:
                 report.errors.append(f"install {scope} {asset.install_name} ({spec.id}): {e}")
 
+    if dry_run:
+        return {"items": preview_items, "installed": installed}
     return installed
 
 
@@ -379,12 +395,87 @@ def install_assets(
             report.errors.append(str(e))
 
     from studio.install_cache import invalidate_install_index
+    from studio.safety import redact_secrets
 
     invalidate_install_index()
     return {
         "installed": merged,
         "installed_by_platform": per_platform,
-        "errors": report.errors,
+        "errors": [redact_secrets(e) for e in report.errors],
         "platform": seen[0],
         "platforms": seen,
+    }
+
+
+def preview_install_assets(
+    assets_data: list[dict[str, Any]],
+    *,
+    install_user: bool,
+    install_project: bool,
+    project_dir: Path,
+    force: bool,
+    token: str | None,
+    platform_id: str = DEFAULT_PLATFORM_ID,
+    platforms: list[str] | None = None,
+) -> dict[str, Any]:
+    """Dry-run install: validate paths under allowed roots and show create/overwrite/skip actions."""
+    target_platforms = platforms if platforms else [platform_id]
+    seen: list[str] = []
+    for pid in target_platforms:
+        spec = get_platform(pid)
+        if spec.id not in seen and spec.status in ("stable", "beta"):
+            seen.append(spec.id)
+
+    if not seen:
+        raise ValueError("No installable platforms selected")
+
+    client = scraper.GitHubClient(token, use_api_metadata=bool(token))
+    report = scraper.ScrapeReport(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        project_dir=str(project_dir),
+        user_cursor_dir=str(platform_paths.user_root(seen[0])),
+        categories_filter=[],
+    )
+    assets = [dict_to_asset(d) for d in assets_data]
+    all_items: list[dict[str, Any]] = []
+    per_platform: dict[str, list[dict[str, Any]]] = {}
+
+    for pid in seen:
+        try:
+            result = _install_to_platform(
+                assets,
+                client=client,
+                install_user=install_user,
+                install_project=install_project,
+                project_dir=project_dir,
+                force=force,
+                platform_id=pid,
+                report=report,
+                dry_run=True,
+            )
+            items = result.get("items", [])
+            per_platform[pid] = items
+            all_items.extend(items)
+        except ValueError as e:
+            report.errors.append(str(e))
+
+    from studio.safety import redact_secrets
+
+    would_write = sum(1 for i in all_items if i.get("would_write"))
+    blocked = sum(1 for i in all_items if i.get("action") == "skip_exists")
+    return {
+        "items": all_items,
+        "by_platform": per_platform,
+        "summary": {
+            "total_planned": len(all_items),
+            "would_write": would_write,
+            "skipped_existing": blocked,
+            "unchanged": sum(1 for i in all_items if i.get("action") == "unchanged"),
+        },
+        "errors": [redact_secrets(e) for e in report.errors],
+        "platform": seen[0],
+        "platforms": seen,
+        "valid": not report.errors and all(
+            i.get("allowed_root") and i.get("destination") for i in all_items if i.get("would_write")
+        ),
     }

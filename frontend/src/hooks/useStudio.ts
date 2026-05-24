@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
   Asset,
   CategoryGroup,
+  CATALOG_BULK_PAGE_SIZE,
+  CATALOG_DEFAULT_LIMIT,
   ConnectionInfo,
-  getCategories,
+  fetchAllCatalog,
+  getBootstrap,
+  getCatalog,
   getConnection,
   getExport,
-  fetchAllCatalog,
   getLeaderboards,
   getPlatforms,
-  getBootstrap,
   postAutoDetectPlatform,
-  getSettings,
   patchSettings,
   type PlatformInfo,
   postImport,
   postInstall,
   postSync,
   removeAsset,
+  type CatalogResponse,
   type LeaderboardEntry,
   type LeaderboardsResponse,
 } from "../api";
@@ -63,6 +65,11 @@ export function useStudio() {
   const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(DEFAULT_CATS));
   const [assets, setAssets] = useState<Asset[]>([]);
   const [catalogTotal, setCatalogTotal] = useState(0);
+  /** Full registry loaded (not bootstrap slice). UI waits on this before first paint. */
+  const [catalogReady, setCatalogReady] = useState(false);
+  /** When set, `assets` were loaded with FTS via GET /api/catalog?q=… */
+  const [catalogSearchQuery, setCatalogSearchQuery] = useState<string | null>(null);
+  const catalogFullyLoadedRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [projectDir, setProjectDir] = useState("");
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
@@ -88,6 +95,11 @@ export function useStudio() {
   const [leaderboards, setLeaderboards] = useState<LeaderboardsResponse | null>(null);
   const [leaderboardTab, setLeaderboardTab] = useState<LeaderboardTab>("trending");
   const [backendReady, setBackendReady] = useState(false);
+  const [initOffline, setInitOffline] = useState(false);
+  const [registryHydrating, setRegistryHydrating] = useState(false);
+  const [bootLabel, setBootLabel] = useState("Starting Skill Harbor…");
+  const [bootProgress, setBootProgress] = useState(0);
+  const autoSyncRanRef = useRef(false);
   const [discoverMode, setDiscoverMode] = useState<DiscoverMode>("discovery");
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("week");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
@@ -136,27 +148,124 @@ export function useStudio() {
     setLeaderboards(data.leaderboards);
     setPlatforms(data.platforms.platforms);
     setAssets(data.catalog.assets);
+    setCatalogTotal(data.catalog.total);
+    setCatalogReady(true);
     setBackendReady(true);
+    setInitOffline(false);
+    setBootProgress(35);
   }, []);
+
+  const hydrateCatalog = useCallback(
+    async (opts?: { silent?: boolean; q?: string }) => {
+      const serverQ = (opts?.q ?? "").trim() || null;
+      if (!serverQ) setRegistryHydrating(true);
+      try {
+        const result = serverQ
+          ? await fetchAllCatalog({
+              q: serverQ,
+              include_stats: true,
+              pageSize: CATALOG_BULK_PAGE_SIZE,
+            })
+          : await fetchAllCatalog({
+              include_stats: true,
+              pageSize: CATALOG_BULK_PAGE_SIZE,
+            });
+
+        startTransition(() => {
+          setAssets(result.assets);
+          setCatalogTotal(result.total);
+          setCatalogSearchQuery(serverQ);
+          catalogFullyLoadedRef.current = !serverQ && result.assets.length >= result.total;
+          setCatalogReady(true);
+          if (result.stats) {
+            setDbStats((prev) => ({
+              asset_count: result.stats!.total_assets,
+              synced_content_count: result.stats!.synced_content,
+              last_synced_at: prev?.last_synced_at,
+            }));
+          }
+        });
+
+        if (!opts?.silent) {
+          pushLog(
+            serverQ
+              ? `Search: ${result.assets.length.toLocaleString()} of ${result.total.toLocaleString()} matches`
+              : `Loaded ${result.assets.length.toLocaleString()} catalog assets`,
+            "ok"
+          );
+        }
+        return result;
+      } finally {
+        if (!serverQ) setRegistryHydrating(false);
+      }
+    },
+    [pushLog]
+  );
+
+  const runBackgroundStartup = useCallback(async () => {
+    setBootLabel("Indexing full registry…");
+    setBootProgress(50);
+    try {
+      const result = await hydrateCatalog({ silent: true });
+      setBootProgress(72);
+
+      const total = result?.total ?? 0;
+      const synced =
+        result?.stats?.synced_content ??
+        result?.assets.filter((a) => a.content || a.content_preview).length ??
+        0;
+      const needsContent =
+        total > 0 && synced < Math.max(1, Math.floor(total * 0.98));
+
+      if (needsContent && !autoSyncRanRef.current) {
+        autoSyncRanRef.current = true;
+        setBootLabel("Syncing skill content from GitHub…");
+        setBootProgress(88);
+        try {
+          const syncResult = await postSync(false);
+          const skipped = (syncResult as { skipped?: boolean }).skipped;
+          if (!skipped && syncResult.updated > 0) {
+            pushLog(`Auto-synced ${syncResult.updated} asset(s) from GitHub`, "ok");
+            await hydrateCatalog({ silent: true });
+          }
+        } catch {
+          /* optional — user can sync manually */
+        }
+      }
+    } finally {
+      setBootProgress(100);
+      setBootLabel("Ready");
+    }
+  }, [hydrateCatalog, pushLog]);
 
   const refresh = useCallback(
     async (opts?: { silent?: boolean }) => {
       try {
+        setInitOffline(false);
         const data = await getBootstrap(platformRef.current);
         applyBootstrap(data);
+        if (!opts?.silent) void runBackgroundStartup();
+        else await hydrateCatalog({ silent: true });
       } catch (e) {
         setBackendReady(false);
+        setCatalogReady(false);
+        setInitOffline(true);
+        catalogFullyLoadedRef.current = false;
         if (!opts?.silent) pushLog(String(e), "err");
       }
     },
-    [pushLog, applyBootstrap]
+    [pushLog, applyBootstrap, hydrateCatalog, runBackgroundStartup]
   );
 
   useEffect(() => {
     let cancelled = false;
-    const delays = [0, 400, 1000, 2000];
+    const delays = [0, 120, 280, 500, 900, 1500];
 
     (async () => {
+      setInitOffline(false);
+      setBootLabel("Connecting to Skill Harbor…");
+      setBootProgress(8);
+
       for (let i = 0; i < delays.length; i++) {
         if (cancelled) return;
         if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
@@ -166,13 +275,16 @@ export function useStudio() {
           if (cancelled) return;
           applyBootstrap(data);
           if (i > 0) pushLog("Connected to API", "ok");
-          await loadCatalog({ silent: true });
+          void runBackgroundStartup();
           return;
         } catch {
-          /* API not ready yet */
+          setBootProgress(12 + i * 10);
         }
       }
       if (!cancelled) {
+        setInitOffline(true);
+        setBackendReady(false);
+        setCatalogReady(false);
         pushLog(
           "Backend unavailable. Run npm run dev in the project folder, then retry.",
           "err"
@@ -183,8 +295,7 @@ export function useStudio() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [applyBootstrap, runBackgroundStartup, pushLog]);
 
   const toggleCat = (cat: string) => {
     setSelectedCats((prev) => {
@@ -198,27 +309,39 @@ export function useStudio() {
   const selectAllCats = () => setSelectedCats(new Set(allCategories));
   const clearCats = () => setSelectedCats(new Set());
 
-  const loadCatalog = useCallback(async (opts?: { silent?: boolean }) => {
-    try {
-      const result = await fetchAllCatalog({ include_stats: true });
-      setAssets(result.assets);
-      setCatalogTotal(result.total);
-      if (result.stats) {
-        setDbStats((prev) => ({
-          asset_count: result.stats!.total_assets,
-          synced_content_count: result.stats!.synced_content,
-          last_synced_at: prev?.last_synced_at,
-        }));
+  const loadCatalog = useCallback(
+    async (opts?: { silent?: boolean; q?: string }) => {
+      try {
+        return await hydrateCatalog(opts);
+      } catch (e) {
+        pushLog(String(e), "err");
+        return null;
       }
-      if (!opts?.silent) {
-        pushLog(`Loaded ${result.assets.length.toLocaleString()} catalog assets`, "ok");
-      }
-      return result;
-    } catch (e) {
-      pushLog(String(e), "err");
-      return null;
-    }
-  }, [pushLog]);
+    },
+    [pushLog, hydrateCatalog]
+  );
+
+  /** Single paginated slice (FTS-aware) — useful for future server-driven Browse pages. */
+  const loadCatalogPage = useCallback(
+    async (params: {
+      offset?: number;
+      limit?: number;
+      q?: string;
+      domain?: string;
+      asset_type?: string;
+      platform?: string;
+    }) => {
+      return getCatalog({
+        offset: params.offset ?? 0,
+        limit: params.limit ?? CATALOG_DEFAULT_LIMIT,
+        q: params.q,
+        domain: params.domain,
+        asset_type: params.asset_type,
+        platform: params.platform ?? platformRef.current,
+      });
+    },
+    []
+  );
 
   const setPlatform = useCallback(
     async (next: string, opts?: { manual?: boolean }) => {
@@ -231,14 +354,12 @@ export function useStudio() {
       try {
         const conn = await getConnection(next);
         setConnection(conn);
-        const result = await fetchAllCatalog({ include_stats: true });
-        setAssets(result.assets);
-        setCatalogTotal(result.total);
+        await hydrateCatalog({ silent: true });
       } catch (e) {
         pushLog(String(e), "err");
       }
     },
-    [pushLog]
+    [pushLog, hydrateCatalog]
   );
 
   const autoDetectPlatform = useCallback(async () => {
@@ -265,15 +386,26 @@ export function useStudio() {
     }
   }, [pushLog, loadCatalog]);
 
-  const hideCompatBootstrapped = useRef(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!backendReady) return;
-    if (!hideCompatBootstrapped.current) {
-      hideCompatBootstrapped.current = true;
-      return;
-    }
-    void loadCatalog();
-  }, [hideIncompatible, backendReady, loadCatalog]);
+    if (!catalogReady) return;
+    const q = search.trim();
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      if (q.length >= 2) {
+        void loadCatalog({ silent: true, q });
+      } else if (catalogSearchQuery) {
+        if (catalogFullyLoadedRef.current) {
+          setCatalogSearchQuery(null);
+        } else {
+          void loadCatalog({ silent: true });
+        }
+      }
+    }, q.length >= 2 ? 280 : 0);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [search, catalogReady, loadCatalog, catalogSearchQuery]);
 
   const syncRegistry = async (force = false) => {
     setBusy(true);
@@ -472,9 +604,11 @@ export function useStudio() {
           (a) => !a.platforms?.length || a.platforms.includes(platform)
         );
       }
-      if (search.trim()) {
-        const q = search.toLowerCase().trim();
-        const ghMatch = q.match(/github\.com[/:]([^/]+)\/([^/?.#\s]+)/);
+      const q = search.trim();
+      const serverFiltered = q && catalogSearchQuery === q;
+      if (q && !serverFiltered) {
+        const ql = q.toLowerCase();
+        const ghMatch = ql.match(/github\.com[/:]([^/]+)\/([^/?.#\s]+)/);
         out = out.filter((a) => {
           const owner = a.source_repo.split("/")[0]?.toLowerCase() ?? "";
           const hay = [
@@ -490,8 +624,8 @@ export function useStudio() {
             .filter(Boolean)
             .join(" ")
             .toLowerCase();
-          if (hay.includes(q)) return true;
-          if (owner === q || owner.startsWith(q)) return true;
+          if (hay.includes(ql)) return true;
+          if (owner === ql || owner.startsWith(ql)) return true;
           if (ghMatch) {
             const repo = `${ghMatch[1]}/${ghMatch[2].replace(/\.git$/, "")}`;
             return a.source_repo.toLowerCase().includes(repo);
@@ -501,7 +635,7 @@ export function useStudio() {
       }
       return out;
     },
-    [selectedCats, typeFilter, hideInstalled, hideIncompatible, platform, search]
+    [selectedCats, typeFilter, hideInstalled, hideIncompatible, platform, search, catalogSearchQuery]
   );
 
   /** Discovery / search — respects category chips. */
@@ -649,6 +783,11 @@ export function useStudio() {
     logOpen,
     setLogOpen,
     backendReady,
+    catalogReady,
+    initOffline,
+    registryHydrating,
+    bootLabel,
+    bootProgress,
     discoverMode,
     setDiscoverMode,
     leaderboards,
@@ -679,6 +818,7 @@ export function useStudio() {
     dbStats,
     syncRegistry,
     loadCatalog,
+    loadCatalogPage,
     pushLog,
     setBusy,
     toggleSelectAllVisible,

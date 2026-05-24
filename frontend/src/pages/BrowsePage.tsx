@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { Studio } from "../hooks/useStudio";
-import { AssetRankCard } from "../components/dashboard/AssetRankCard";
+import { VirtualBrowseGrid } from "../components/browse/VirtualBrowseGrid";
+import { FilterChips } from "../components/browse/FilterChips";
 import { MultiSelectDropdown } from "../components/browse/MultiSelectDropdown";
+import { ActionToolbar, ActionToolbarDivider } from "../components/layout/ActionToolbar";
+import { HarborEmpty } from "../components/ui/HarborEmpty";
+import { SelectionPill } from "../components/ui/SelectionPill";
 import { listRepoOwners, repoOwner } from "../lib/ranking";
 
 const TYPE_OPTIONS = [
@@ -13,11 +17,12 @@ const TYPE_OPTIONS = [
 
 type SortKey = "stars" | "votes" | "name";
 
-const PAGE_SIZE = 60;
+type Props = {
+  studio: Studio;
+  searchRef?: RefObject<HTMLInputElement | null>;
+};
 
-type Props = { studio: Studio };
-
-export function BrowsePage({ studio }: Props) {
+export function BrowsePage({ studio, searchRef }: Props) {
   const {
     browseAssets,
     catalogTotal,
@@ -34,13 +39,15 @@ export function BrowsePage({ studio }: Props) {
     domainLabels,
     techStackLabels,
     repoOwners,
+    busy,
+    syncRegistry,
   } = studio;
   const [authorFilters, setAuthorFilters] = useState<Set<string>>(() => new Set());
   const [typeFilters, setTypeFilters] = useState<Set<string>>(() => new Set());
   const [domainFilters, setDomainFilters] = useState<Set<string>>(() => new Set());
   const [stackFilters, setStackFilters] = useState<Set<string>>(() => new Set());
   const [sortBy, setSortBy] = useState<SortKey>("stars");
-  const [page, setPage] = useState(1);
+  const pageRef = useRef<HTMLDivElement>(null);
 
   const domainOptions = useMemo(() => {
     const slugs = new Set<string>();
@@ -115,28 +122,8 @@ export function BrowsePage({ studio }: Props) {
     return sorted;
   }, [browseAssets, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
 
-  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
-
-  useEffect(() => {
-    setPage((p) => Math.min(p, totalPages));
-  }, [totalPages]);
-
-  useEffect(() => {
-    document.querySelector(".browse-page")?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [page]);
-
-  const pageStart = shown.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(page * PAGE_SIZE, shown.length);
-  const pageItems = useMemo(
-    () => shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [shown, page]
-  );
-
-  const shownIds = useMemo(() => pageItems.map((a) => a.id), [pageItems]);
+  const useVirtualGrid = shown.length > 0;
+  const shownIds = useMemo(() => shown.map((a) => a.id), [shown]);
   const allShownSelected =
     shownIds.length > 0 && shownIds.every((id) => selectedIds.has(id));
   const someSelected = shownIds.some((id) => selectedIds.has(id));
@@ -154,19 +141,91 @@ export function BrowsePage({ studio }: Props) {
     setStackFilters(new Set());
   };
 
+  const handleToggleCheck = useCallback((id: string) => toggleRow(id), [toggleRow]);
+  const handleSelect = useCallback((id: string) => setSelectedAssetId(id), [setSelectedAssetId]);
+
+  useEffect(() => {
+    pageRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [search, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
+
+  const filterChips = useMemo(() => {
+    const chips: { key: string; label: string; onRemove: () => void }[] = [];
+    for (const v of authorFilters) {
+      const label = authorOptions.find((o) => o.value === v)?.label ?? v;
+      chips.push({
+        key: `author-${v}`,
+        label: `Author: ${label}`,
+        onRemove: () =>
+          setAuthorFilters((prev) => {
+            const n = new Set(prev);
+            n.delete(v);
+            return n;
+          }),
+      });
+    }
+    for (const v of typeFilters) {
+      const label = TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
+      chips.push({
+        key: `type-${v}`,
+        label: label,
+        onRemove: () =>
+          setTypeFilters((prev) => {
+            const n = new Set(prev);
+            n.delete(v);
+            return n;
+          }),
+      });
+    }
+    for (const v of domainFilters) {
+      const label = domainOptions.find((o) => o.value === v)?.label ?? v;
+      chips.push({
+        key: `domain-${v}`,
+        label: label,
+        onRemove: () =>
+          setDomainFilters((prev) => {
+            const n = new Set(prev);
+            n.delete(v);
+            return n;
+          }),
+      });
+    }
+    for (const v of stackFilters) {
+      const label = stackOptions.find((o) => o.value === v)?.label ?? v;
+      chips.push({
+        key: `stack-${v}`,
+        label: `Stack: ${label}`,
+        onRemove: () =>
+          setStackFilters((prev) => {
+            const n = new Set(prev);
+            n.delete(v);
+            return n;
+          }),
+      });
+    }
+    return chips;
+  }, [authorFilters, typeFilters, domainFilters, stackFilters, authorOptions, domainOptions, stackOptions]);
+
   return (
-    <div className="harbor-page browse-page">
+    <div ref={pageRef} className="harbor-page browse-page">
       <header className="browse-toolbar">
+        <div className="browse-toolbar__panel harbor-action-bar harbor-action-bar--stacked">
         <div className="browse-toolbar__row browse-toolbar__row--search">
-          <input
-            type="search"
-            className="browse-toolbar__search"
-            placeholder="Search by skill name, author, or repo…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <div className="browse-search-wrap">
+            <input
+              ref={searchRef}
+              type="search"
+              className="browse-toolbar__search"
+              placeholder="Search by skill name, author, or repo…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-keyshortcuts="/"
+            />
+            <kbd className="browse-search-kbd" aria-hidden>
+              /
+            </kbd>
+          </div>
           <select
-            className="browse-toolbar__sort"
+            className="harbor-action-bar__select browse-toolbar__sort"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
             aria-label="Sort assets"
@@ -201,96 +260,70 @@ export function BrowsePage({ studio }: Props) {
             selected={stackFilters}
             onChange={setStackFilters}
           />
-          {activeFilterCount > 0 ? (
-            <button type="button" className="browse-toolbar__clear" onClick={clearFilters}>
-              Reset filters
-            </button>
-          ) : null}
         </div>
-        <div className="browse-toolbar__row browse-toolbar__row--actions">
-          <div className="browse-toolbar__selection">
-            <button
-              type="button"
-              className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-              onClick={() => toggleSelectAllForIds(shownIds)}
-              disabled={pageItems.length === 0}
-            >
-              {allShownSelected ? "Deselect page" : "Select page"}
-            </button>
-            <button
-              type="button"
-              className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-              onClick={deselectAll}
-              disabled={selectedIds.size === 0}
-            >
-              Deselect all
-            </button>
-            {someSelected ? (
-              <span className="browse-toolbar__selected">{selectedIds.size} in queue</span>
-            ) : null}
-          </div>
-          <span className="browse-toolbar__count">
-            {shown.length === 0
+        <FilterChips chips={filterChips} onClearAll={filterChips.length > 1 ? clearFilters : undefined} />
+        <ActionToolbar
+          className="browse-toolbar__actions"
+          count={
+            shown.length === 0
               ? `0 matches · ${registryTotal.toLocaleString()} in registry`
               : shown.length === registryTotal
-                ? `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${shown.length.toLocaleString()}`
-                : `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${shown.length.toLocaleString()} matches · ${registryTotal.toLocaleString()} in registry`}
-          </span>
+                ? `${shown.length.toLocaleString()} assets`
+                : `${shown.length.toLocaleString()} matches · ${registryTotal.toLocaleString()} in registry`
+          }
+        >
+          <SelectionPill
+            pressed={allShownSelected}
+            onClick={() => toggleSelectAllForIds(shownIds)}
+            disabled={shown.length === 0}
+          >
+            {allShownSelected ? "Deselect shown" : "Select shown"}
+          </SelectionPill>
+          <SelectionPill pressed={false} onClick={deselectAll} disabled={selectedIds.size === 0}>
+            Deselect all
+          </SelectionPill>
+          {someSelected ? (
+            <>
+              <ActionToolbarDivider />
+              <span className="browse-toolbar__selected">{selectedIds.size} in queue</span>
+            </>
+          ) : null}
+        </ActionToolbar>
         </div>
       </header>
-      <div className="harbor-card-grid harbor-card-grid--scroll">
-        {pageItems.map((asset) => (
-          <AssetRankCard
-            key={asset.id}
-            asset={asset}
-            selected={selectedAssetId === asset.id}
-            checked={selectedIds.has(asset.id)}
-            onToggleCheck={() => toggleRow(asset.id)}
-            onSelect={() => setSelectedAssetId(asset.id)}
-          />
-        ))}
-      </div>
-      {shown.length > PAGE_SIZE ? (
-        <nav className="browse-pagination" aria-label="Browse pages">
-          <button
-            type="button"
-            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-            onClick={() => setPage(1)}
-            disabled={page <= 1}
-          >
-            First
-          </button>
-          <button
-            type="button"
-            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-          >
-            Previous
-          </button>
-          <span className="browse-pagination__status">
-            Page {page.toLocaleString()} of {totalPages.toLocaleString()}
-          </span>
-          <button
-            type="button"
-            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-          >
-            Next
-          </button>
-          <button
-            type="button"
-            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-            onClick={() => setPage(totalPages)}
-            disabled={page >= totalPages}
-          >
-            Last
-          </button>
-        </nav>
+      {useVirtualGrid ? (
+        <VirtualBrowseGrid
+          items={shown}
+          scrollRef={pageRef}
+          selectedAssetId={selectedAssetId}
+          selectedIds={selectedIds}
+          onToggleCheck={handleToggleCheck}
+          onSelect={handleSelect}
+        />
       ) : null}
       {shown.length === 0 ? (
-        <p className="harbor-empty">No assets match. Try Sync registry or adjust filters.</p>
+        <HarborEmpty
+          title={activeFilterCount > 0 || search.trim() ? "No matches" : "Registry is empty"}
+          description={
+            activeFilterCount > 0 || search.trim()
+              ? "Try removing a filter or broadening your search."
+              : "Sync from GitHub to populate the catalog with skills, rules, and agents."
+          }
+        >
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--primary harbor-btn--sm"
+            onClick={() => syncRegistry()}
+            disabled={busy}
+          >
+            {busy ? "Syncing…" : "Sync registry"}
+          </button>
+          {(activeFilterCount > 0 || search.trim()) && (
+            <button type="button" className="harbor-btn harbor-btn--ghost harbor-btn--sm" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
+        </HarborEmpty>
       ) : null}
     </div>
   );

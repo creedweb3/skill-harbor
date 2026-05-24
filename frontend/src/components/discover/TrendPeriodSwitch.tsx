@@ -16,13 +16,13 @@ type Props = {
 
 export function TrendPeriodSwitch({ period, onChange, hasLiveData }: Props) {
   return (
-    <div className="trend-periods" role="tablist" aria-label="Trending period">
+    <div className="harbor-periods" role="tablist" aria-label="Trending period">
       {PERIODS.map((p) => (
         <button
           key={p.id}
           type="button"
           role="tab"
-          className={`period-pill ${period === p.id ? "active" : ""}`}
+          className={`harbor-periods__pill ${period === p.id ? "is-active" : ""}`}
           aria-selected={period === p.id}
           title={p.hint}
           onClick={() => onChange(p.id)}

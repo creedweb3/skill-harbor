@@ -29,6 +29,7 @@ from studio.bootstrap import bootstrap_harbor
 from studio.database import get_connection, get_db_path
 from studio.db_config import database_info
 from studio import sync as harbor_sync
+from studio.safety import sanitize_for_log
 
 app = FastAPI(
     title="Skill Harbor",
@@ -50,6 +51,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _csp_for_path(path: str) -> str:
+    """Relaxed CSP for FastAPI docs; strict default for JSON API responses."""
+    if path.startswith(("/docs", "/redoc", "/openapi.json")):
+        return (
+            "default-src 'self'; "
+            "img-src 'self' data: https://fastapi.tiangolo.com; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+        )
+    return "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response: Response = await call_next(request)
+    response.headers["Content-Security-Policy"] = _csp_for_path(request.url.path)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-XSS-Protection"] = "0"
+    return response
 
 catalog = CatalogService()
 
@@ -554,12 +579,12 @@ def get_catalog(
     platform: str | None = None,
     q: str | None = None,
     period: str = "all",
-    limit: int = 200,
+    limit: int = 60,
     offset: int = 0,
     include_stats: bool = False,
 ) -> dict[str, Any]:
-    # Local registry can be 3k+ rows; allow large pages for Browse (client paginates).
-    cap = min(max(limit, 1), 5000)
+    cap = min(max(limit, 1), 500)
+    off = max(offset, 0)
     assets, total = catalog.list_assets(
         domain=domain,
         tech_tag=tech,
@@ -568,12 +593,18 @@ def get_catalog(
         q=q,
         period=period,
         limit=cap,
-        offset=offset,
+        offset=off,
     )
     project = config.get_project_dir()
     active_platform = platform or config.resolve_active_platform(project)
     enriched = harbor_sync.enrich_catalog_assets(assets, project, platform_id=active_platform)
-    out: dict[str, Any] = {"assets": enriched, "total": total}
+    out: dict[str, Any] = {
+        "assets": enriched,
+        "total": total,
+        "offset": off,
+        "limit": cap,
+        "has_more": off + len(enriched) < total,
+    }
     if include_stats:
         out["stats"] = catalog.stats()
     return out
@@ -946,6 +977,32 @@ def preview(body: PreviewRequest) -> dict[str, Any]:
     }
 
 
+@app.post("/api/install/preview")
+def install_preview(body: InstallRequest) -> dict[str, Any]:
+    """Dry-run install: validate destinations stay under platform roots and preview diffs."""
+    if not body.assets:
+        raise HTTPException(400, "No assets selected")
+    if not body.install_user and not body.install_project:
+        raise HTTPException(400, "Select at least one install target")
+    try:
+        primary = body.platform or config.resolve_active_platform(config.get_project_dir())
+        target_platforms = body.platforms if body.platforms else [primary]
+        if primary not in target_platforms:
+            target_platforms = [primary, *target_platforms]
+        return scraper_bridge.preview_install_assets(
+            body.assets,
+            install_user=body.install_user,
+            install_project=body.install_project,
+            project_dir=config.get_project_dir(),
+            force=body.force,
+            token=config.get_github_token(),
+            platform_id=primary,
+            platforms=target_platforms,
+        )
+    except Exception as e:
+        raise HTTPException(500, sanitize_for_log(str(e))) from e
+
+
 @app.post("/api/install")
 def install(body: InstallRequest) -> dict[str, Any]:
     if not body.assets:
@@ -968,7 +1025,7 @@ def install(body: InstallRequest) -> dict[str, Any]:
             platforms=target_platforms,
         )
     except Exception as e:
-        raise HTTPException(500, str(e)) from e
+        raise HTTPException(500, sanitize_for_log(str(e))) from e
 
 
 @app.get("/api/export")

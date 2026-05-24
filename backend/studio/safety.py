@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+# Path traversal — install names must be single path segments
+_UNSAFE_INSTALL_NAME = re.compile(r"[\x00/\\]|(?:\.\.)")
+
+# GitHub / bearer tokens and config-style secret assignments
+_SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), "ghp_[REDACTED]"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "github_pat_[REDACTED]"),
+    (re.compile(r"\bBearer\s+[^\s\"']+", re.I), "Bearer [REDACTED]"),
+    (re.compile(r"\bAuthorization:\s*[^\s\"']+", re.I), "Authorization: [REDACTED]"),
+    (
+        re.compile(
+            r"(?i)(GITHUB_TOKEN|GH_TOKEN|SKILL_HARBOR_ADMIN(?:_GITHUB)?_TOKEN)\s*[=:]\s*[^\s\"']+"
+        ),
+        r"\1=[REDACTED]",
+    ),
+    (re.compile(r"(?i)(admin_)?github_token[\"']?\s*[:=]\s*[\"']?[^\s\"',}]+"), "[token redacted]"),
+]
 
 # High-confidence block patterns (case-insensitive)
 _BLOCK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -107,6 +127,46 @@ def safety_for_asset_dict(asset: dict[str, Any]) -> dict[str, Any]:
     text = asset.get("content") or asset.get("content_preview") or ""
     path = asset.get("source_path") or asset.get("path") or ""
     return assess_content_safety(text, path).to_dict()
+
+
+def validate_install_name(name: str) -> str:
+    """Reject install names that could escape platform install roots."""
+    if not name or not str(name).strip():
+        raise ValueError("Install name is empty")
+    clean = str(name).strip()
+    if clean in (".", ".."):
+        raise ValueError(f"Unsafe install name: {clean!r}")
+    if _UNSAFE_INSTALL_NAME.search(clean):
+        raise ValueError(f"Unsafe install name (path traversal): {clean!r}")
+    return clean
+
+
+def assert_path_under_root(path: Path, root: Path) -> Path:
+    """Resolve path and ensure it stays within root (blocks symlink escape)."""
+    resolved = path.resolve()
+    root_resolved = root.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError(
+            f"Install path escapes allowed root: {resolved} is not under {root_resolved}"
+        ) from exc
+    return resolved
+
+
+def redact_secrets(text: str) -> str:
+    """Remove GitHub tokens and auth material from strings destined for logs."""
+    if not text:
+        return text
+    out = text
+    for pattern, replacement in _SECRET_PATTERNS:
+        out = pattern.sub(replacement, out)
+    return out
+
+
+def sanitize_for_log(text: str) -> str:
+    """Alias for activity/sync log sanitization."""
+    return redact_secrets(text)
 
 
 def require_safe_for_install(text: str, path: str = "", install_name: str = "") -> None:

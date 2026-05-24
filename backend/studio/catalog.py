@@ -20,7 +20,7 @@ _LIST_SELECT = """
     a.upvotes, a.downvotes, a.primary_domain
 """
 from studio.app_settings import get_min_repo_stars
-from studio.database import get_connection, row_to_dict
+from studio.database import fts_match_query, get_connection, row_to_dict
 from studio.github_urls import blob_url, repo_url
 from studio.policy import SOURCE_CUSTOM, SOURCE_DISCOVERED, SOURCE_MANIFEST
 
@@ -250,7 +250,7 @@ class CatalogService:
         q: str | None = None,
         period: str = "all",
         platform: str | None = None,
-        limit: int = 500,
+        limit: int = 60,
         offset: int = 0,
         include_all: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -287,18 +287,29 @@ class CatalogService:
 
         if q:
             q_norm = q.strip()
-            like = f"%{q_norm}%"
-            repo_like = like
+            fts_q = fts_match_query(q_norm)
+            fts_parts: list[str] = []
+            if fts_q:
+                fts_parts.append(
+                    "EXISTS (SELECT 1 FROM assets_fts "
+                    "WHERE assets_fts.asset_id = a.id AND assets_fts MATCH ?)"
+                )
+                params.append(fts_q)
             if "github.com/" in q_norm.lower():
                 tail = q_norm.lower().split("github.com/")[-1].strip("/")
-                parts = tail.split("/")
-                if len(parts) >= 2:
-                    repo_like = f"%{parts[0]}/{parts[1]}%"
-            clauses.append(
-                "(a.title LIKE ? OR a.install_name LIKE ? OR a.source_repo LIKE ? "
-                "OR a.path LIKE ? OR a.content_preview LIKE ? OR a.raw_url LIKE ? OR a.id LIKE ?)"
-            )
-            params.extend([like, like, repo_like, like, like, like, like])
+                gh_parts = tail.split("/")
+                if len(gh_parts) >= 2:
+                    repo_like = f"%{gh_parts[0]}/{gh_parts[1].split('.')[0]}%"
+                    fts_parts.append("a.source_repo LIKE ?")
+                    params.append(repo_like)
+            if not fts_parts:
+                like = f"%{q_norm}%"
+                fts_parts.append(
+                    "(a.title LIKE ? OR a.install_name LIKE ? OR a.source_repo LIKE ? "
+                    "OR a.path LIKE ? OR a.content_preview LIKE ? OR a.raw_url LIKE ? OR a.id LIKE ?)"
+                )
+                params.extend([like, like, like, like, like, like, like])
+            clauses.append(f"({' OR '.join(fts_parts)})")
 
         if period != "all" and PERIOD_MS.get(period):
             # filter by repo_pushed_at ISO string — approximate via datetime

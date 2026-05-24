@@ -1,33 +1,39 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useMemo, type CSSProperties } from "react";
 import type { Studio } from "../hooks/useStudio";
 import {
   buildDiscoverySections,
   discoveryLimits,
 } from "../lib/dashboard";
-import { sectionViewFromSection, assetInDomain } from "../lib/categoryDetail";
+import {
+  sectionViewFromSection,
+  assetInDomain,
+  type DiscoverySectionView,
+} from "../lib/categoryDetail";
 import { AssetRankCard } from "../components/dashboard/AssetRankCard";
 import { RepoTrendCard } from "../components/dashboard/RepoTrendCard";
+import { PanelFooter } from "../components/discover/PanelFooter";
+import { SectionBar } from "../components/discover/SectionBar";
 import { TrendPeriodSwitch } from "../components/discover/TrendPeriodSwitch";
+import { SelectionPill } from "../components/ui/SelectionPill";
+import { TextAction } from "../components/ui/TextAction";
+import { clearDomainHash } from "../lib/domainHash";
 import { DiscoverySectionPage } from "./DiscoverySectionPage";
 
-type Props = { studio: Studio };
+type Props = {
+  studio: Studio;
+  sectionView: DiscoverySectionView | null;
+  setSectionView: (view: DiscoverySectionView | null) => void;
+  onOpenDomain: (view: DiscoverySectionView) => void;
+  onGoToDomains: () => void;
+};
 
-function SectionToolbar({
-  children,
-  count,
-}: {
-  children: ReactNode;
-  count?: string;
-}) {
-  return (
-    <div className="discovery-section-toolbar">
-      <div className="discovery-section-toolbar__left">{children}</div>
-      {count ? <span className="discovery-section-toolbar__count">{count}</span> : null}
-    </div>
-  );
-}
-
-export function DiscoveryPage({ studio }: Props) {
+export function DiscoveryPage({
+  studio,
+  sectionView,
+  setSectionView,
+  onOpenDomain,
+  onGoToDomains,
+}: Props) {
   const {
     discoveryPanelProfessions,
     discoveryUi,
@@ -44,8 +50,6 @@ export function DiscoveryPage({ studio }: Props) {
     toggleSelectAllForIds,
     dbStats,
   } = studio;
-
-  const [sectionView, setSectionView] = useState<ReturnType<typeof sectionViewFromSection>>(null);
 
   const lim = discoveryLimits(discoveryUi);
   const layoutCols = discoveryUi?.layout?.columns ?? 3;
@@ -88,7 +92,10 @@ export function DiscoveryPage({ studio }: Props) {
       <DiscoverySectionPage
         studio={studio}
         view={sectionView}
-        onBack={() => setSectionView(null)}
+        onBack={() => {
+          setSectionView(null);
+          clearDomainHash();
+        }}
       />
     );
   }
@@ -102,7 +109,13 @@ export function DiscoveryPage({ studio }: Props) {
 
   const openSection = (section: (typeof sections)[number]) => {
     const view = sectionViewFromSection(section);
-    if (view) setSectionView(view);
+    if (!view) return;
+    if (view.kind === "profession" && view.domain) {
+      onOpenDomain(view);
+      return;
+    }
+    clearDomainHash();
+    setSectionView(view);
   };
 
   return (
@@ -131,16 +144,21 @@ export function DiscoveryPage({ studio }: Props) {
               <p className="muted">{trending.description}</p>
             </div>
           </header>
-          <SectionToolbar count={`${repoTrends.length} repos shown`}>
-            <TrendPeriodSwitch period={trendPeriod} onChange={setTrendPeriod} hasLiveData={hasCatalog} />
-            <button
-              type="button"
-              className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-              onClick={() => openSection(trending)}
-            >
-              View all rankings →
-            </button>
-          </SectionToolbar>
+          <SectionBar
+            start={
+              <TrendPeriodSwitch
+                period={trendPeriod}
+                onChange={setTrendPeriod}
+                hasLiveData={hasCatalog}
+              />
+            }
+            end={
+              <TextAction accent onClick={() => openSection(trending)}>
+                View all rankings →
+              </TextAction>
+            }
+            meta={`${repoTrends.length} repos`}
+          />
           <div className="harbor-card-grid harbor-card-grid--row">
             {repoTrends.map((trend, i) => (
               <RepoTrendCard
@@ -169,22 +187,22 @@ export function DiscoveryPage({ studio }: Props) {
           </header>
           {forYouItems.length > 0 ? (
             <>
-              <SectionToolbar count={`${forYouItems.length} picks`}>
-                <button
-                  type="button"
-                  className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-                  onClick={() => toggleSelectAllForIds(forYouIds)}
-                >
-                  {allForYouSelected ? "Deselect section" : "Select section"}
-                </button>
-                <button
-                  type="button"
-                  className="harbor-btn harbor-btn--ghost harbor-btn--sm discovery-section-toolbar__primary"
-                  onClick={() => openSection(forYou)}
-                >
-                  Show all recommendations →
-                </button>
-              </SectionToolbar>
+              <SectionBar
+                start={
+                  <SelectionPill
+                    pressed={allForYouSelected}
+                    onClick={() => toggleSelectAllForIds(forYouIds)}
+                  >
+                    {allForYouSelected ? "Deselect section" : "Select section"}
+                  </SelectionPill>
+                }
+                end={
+                  <TextAction accent onClick={() => openSection(forYou)}>
+                    Show all recommendations →
+                  </TextAction>
+                }
+                meta={`${forYouItems.length} picks`}
+              />
               <div className="harbor-card-grid harbor-card-grid--row">
                 {forYouItems.map((item, i) => (
                   <AssetRankCard
@@ -208,14 +226,20 @@ export function DiscoveryPage({ studio }: Props) {
       ) : null}
 
       {professions.length > 0 ? (
-        <section className="discovery-section">
-          <h2 className="discovery-section-title">
-            By profession · top {lim.itemsPerDomain} skills by stars
-            <span className="discovery-section-meta muted">
-              {layoutCols}×{layoutRows} grid · {professions.length} categories
-              {discoveryUi?.rotate_domains ? " · rotates weekly" : ""}
-            </span>
-          </h2>
+        <section className="discovery-section discovery-section--domains">
+          <header className="discovery-domains-head">
+            <div className="discovery-domains-head__main">
+              <span className="harbor-badge harbor-badge--section">By domain</span>
+              <h2>Top skills by stars</h2>
+              <p className="muted discovery-domains-head__lead">
+                {lim.itemsPerDomain} featured per domain · {professions.length} categories in the
+                registry
+              </p>
+            </div>
+            <TextAction accent className="discovery-domains-head__cta" onClick={onGoToDomains}>
+              All domains →
+            </TextAction>
+          </header>
           <div
             className="profession-panels profession-panels--grid"
             style={
@@ -242,7 +266,7 @@ export function DiscoveryPage({ studio }: Props) {
                   <header className="profession-panel__head">
                     <h3 className="profession-panel__title">{section.label}</h3>
                     <span className="profession-panel__count muted">
-                      {assets.filter((a) => assetInDomain(a, section.domain)).length} in category
+                      {assets.filter((a) => assetInDomain(a, section.domain)).length} in domain
                     </span>
                   </header>
                   <div className="profession-panel__cards profession-panel__cards--matrix">
@@ -258,22 +282,21 @@ export function DiscoveryPage({ studio }: Props) {
                       />
                     ))}
                   </div>
-                  <footer className="profession-panel__footer">
-                    <button
-                      type="button"
-                      className="harbor-btn harbor-btn--ghost harbor-btn--sm"
-                      onClick={() => toggleSelectAllForIds(sectionIds)}
-                    >
-                      {allSectionSelected ? "Deselect" : "Select visible"}
-                    </button>
-                    <button
-                      type="button"
-                      className="harbor-btn harbor-btn--ghost harbor-btn--sm profession-panel__more"
-                      onClick={() => openSection(section)}
-                    >
-                      Show all →
-                    </button>
-                  </footer>
+                  <PanelFooter
+                    start={
+                      <SelectionPill
+                        pressed={allSectionSelected}
+                        onClick={() => toggleSelectAllForIds(sectionIds)}
+                      >
+                        {allSectionSelected ? "Deselect visible" : "Select visible"}
+                      </SelectionPill>
+                    }
+                    end={
+                      <TextAction accent onClick={() => openSection(section)}>
+                        Show all →
+                      </TextAction>
+                    }
+                  />
                 </article>
               );
             })}

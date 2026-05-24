@@ -1,4 +1,4 @@
-import type { Asset } from "../api";
+import type { Asset, DiscoveryProfession } from "../api";
 import type { TrendPeriod } from "../hooks/useStudio";
 import type { InstalledRow } from "./installedGroups";
 import {
@@ -17,6 +17,16 @@ export type DiscoverySectionView = {
   description?: string;
   domain?: string;
 };
+
+export function domainViewForProfession(p: DiscoveryProfession): DiscoverySectionView {
+  return {
+    kind: "profession",
+    id: `profession-${p.domain}`,
+    label: p.label,
+    description: `All skills ranked in ${p.label}.`,
+    domain: p.domain,
+  };
+}
 
 export type CategorySortKey =
   | "rank"

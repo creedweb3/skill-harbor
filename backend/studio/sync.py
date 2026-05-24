@@ -10,6 +10,7 @@ from typing import Any
 from studio import platform_paths
 from studio.catalog import CatalogService
 from studio.install_cache import get_install_index
+from studio.safety import sanitize_for_log
 
 
 def sync_catalog(*, force: bool = False, max_workers: int = 12) -> dict[str, Any]:
@@ -57,7 +58,7 @@ def sync_catalog(*, force: bool = False, max_workers: int = 12) -> dict[str, Any
             if ok:
                 updated += 1
             elif err:
-                errors.append(f"{aid}: {err}")
+                errors.append(f"{aid}: {sanitize_for_log(err)}")
 
     status = "ok" if not errors else "partial"
     catalog.finish_sync_run(run_id, updated=updated, errors=errors, status=status)

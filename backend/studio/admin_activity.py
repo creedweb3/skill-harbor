@@ -6,16 +6,18 @@ from typing import Any
 
 from studio.admin_jobs import _enrich
 from studio.database import get_connection, row_to_dict
+from studio.safety import sanitize_for_log
 
 
 def log_activity(action: str, detail: str = "", *, status: str = "ok") -> int:
+    safe_detail = sanitize_for_log(detail)[:2000]
     with get_connection() as conn:
         cur = conn.execute(
             """
             INSERT INTO admin_activity (action, detail, status, progress, logs, finished_at)
             VALUES (?, ?, ?, 100, '[]', datetime('now'))
             """,
-            (action, detail[:2000], status),
+            (action, safe_detail, status),
         )
         conn.commit()
         return int(cur.lastrowid)

@@ -1,4 +1,8 @@
-"""Track per-repo crawl state — avoid re-crawling the same repo every evolve run."""
+"""Track per-repo crawl state — avoid re-crawling the same repo every evolve run.
+
+File-level precision (skill-dir allowlists, node_modules/vendor/dist skips) lives
+in studio.path_filters and is applied during extract_assets_from_repo + dedupe.
+"""
 
 from __future__ import annotations
 

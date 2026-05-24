@@ -24,6 +24,7 @@ INTENT_SEARCHES: list[tuple[str, str, float]] = [
 PATH_SEARCHES: list[tuple[str, str, float]] = [
     ("filename:SKILL.md", "path-skill-md", 1.5),
     ("path:.cursor/skills", "path-cursor-skills", 1.5),
+    ("path:skills/", "path-skills-dir", 1.45),
     ("path:.cursor/rules", "path-cursor-rules", 1.35),
     ("path:.cursor/commands", "path-cursor-commands", 1.2),
     ("path:.cursor/agents", "path-cursor-agents", 1.2),
@@ -131,6 +132,8 @@ def repo_has_skill_artifacts(client: Any, owner: str, repo: str) -> bool:
     checks = (
         f"repo:{owner}/{repo} filename:SKILL.md",
         f"repo:{owner}/{repo} path:.cursor/skills",
+        f"repo:{owner}/{repo} path:skills/",
+        f"repo:{owner}/{repo} path:.claude/skills",
         f"repo:{owner}/{repo} extension:mdc path:.cursor/rules",
         f"repo:{owner}/{repo} filename:.cursorrules",
     )

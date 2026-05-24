@@ -322,6 +322,9 @@ export const postAutoDetectPlatform = () =>
 export type CatalogResponse = {
   assets: Asset[];
   total: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
   stats?: {
     total_assets: number;
     synced_content: number;
@@ -329,53 +332,82 @@ export type CatalogResponse = {
   };
 };
 
-export const CATALOG_PAGE_SIZE = 2000;
+/** Default page size for GET /api/catalog (matches backend). */
+export const CATALOG_DEFAULT_LIMIT = 60;
 
-export const getCatalog = (params?: {
+/** Page size when bulk-loading the full registry client-side. */
+export const CATALOG_BULK_PAGE_SIZE = 500;
+
+export type CatalogQueryParams = {
   domain?: string;
+  tech?: string;
   asset_type?: string;
   platform?: string;
   q?: string;
   period?: string;
+  include_stats?: boolean;
+};
+
+export type CatalogPageParams = CatalogQueryParams & {
   limit?: number;
   offset?: number;
-  include_stats?: boolean;
-}) => {
+};
+
+export const getCatalog = (params?: CatalogPageParams) => {
   const sp = new URLSearchParams();
   if (params?.domain) sp.set("domain", params.domain);
+  if (params?.tech) sp.set("tech", params.tech);
   if (params?.asset_type) sp.set("asset_type", params.asset_type);
   if (params?.platform) sp.set("platform", params.platform);
   if (params?.q) sp.set("q", params.q);
   if (params?.period) sp.set("period", params.period);
-  if (params?.limit) sp.set("limit", String(params.limit));
-  if (params?.offset) sp.set("offset", String(params.offset));
+  sp.set("limit", String(params?.limit ?? CATALOG_DEFAULT_LIMIT));
+  sp.set("offset", String(params?.offset ?? 0));
   if (params?.include_stats) sp.set("include_stats", "true");
   const q = sp.toString();
-  return api<CatalogResponse>(`/api/catalog${q ? `?${q}` : ""}`);
+  return api<CatalogResponse>(`/api/catalog?${q}`);
 };
 
-/** Load every catalog row (paginated) for Browse / install selection. */
+/** Load every catalog row (paginated) for install selection / client-side Browse filters. */
 export async function fetchAllCatalog(
-  params?: Omit<Parameters<typeof getCatalog>[0], "limit" | "offset">
+  params?: CatalogQueryParams & { pageSize?: number }
 ): Promise<CatalogResponse> {
-  const pageSize = CATALOG_PAGE_SIZE;
-  let offset = 0;
-  const all: Asset[] = [];
-  let total = 0;
-  let stats: CatalogResponse["stats"];
+  const pageSize = params?.pageSize ?? CATALOG_BULK_PAGE_SIZE;
+  const { pageSize: _drop, ...rest } = params ?? {};
 
-  while (true) {
-    const page = await getCatalog({
-      ...params,
-      limit: pageSize,
-      offset,
-      include_stats: offset === 0,
-    });
+  const first = await getCatalog({
+    ...rest,
+    limit: pageSize,
+    offset: 0,
+    include_stats: true,
+  });
+
+  const all = [...first.assets];
+  const total = first.total;
+  const stats = first.stats;
+
+  if (all.length >= total || first.assets.length < pageSize) {
+    return { assets: all, total, stats };
+  }
+
+  const offsets: number[] = [];
+  for (let offset = pageSize; offset < total; offset += pageSize) {
+    offsets.push(offset);
+  }
+
+  const restPages = await Promise.all(
+    offsets.map((offset) =>
+      getCatalog({
+        ...rest,
+        limit: pageSize,
+        offset,
+        include_stats: false,
+      })
+    )
+  );
+
+  for (const page of restPages) {
     all.push(...page.assets);
-    total = page.total;
-    if (offset === 0) stats = page.stats;
-    if (all.length >= total || page.assets.length < pageSize) break;
-    offset += pageSize;
   }
 
   return { assets: all, total, stats };

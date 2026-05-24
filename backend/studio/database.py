@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -139,3 +140,87 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)
+
+
+_FTS_TOKEN = re.compile(r"[\w./-]+", re.UNICODE)
+
+
+def fts_match_query(q: str) -> str | None:
+    """Build an FTS5 MATCH string (prefix terms joined with AND)."""
+    q_norm = q.strip()
+    if not q_norm:
+        return None
+    parts: list[str] = []
+    for token in _FTS_TOKEN.findall(q_norm):
+        if not token or token in (".", "-"):
+            continue
+        escaped = token.replace('"', '""')
+        parts.append(f'"{escaped}"*' if len(escaped) >= 2 else f'"{escaped}"')
+    return " AND ".join(parts) if parts else None
+
+
+def ensure_assets_fts(conn: sqlite3.Connection) -> None:
+    """FTS5 virtual table + triggers; backfill when empty."""
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS assets_fts USING fts5(
+            asset_id UNINDEXED,
+            title,
+            install_name,
+            source_repo,
+            path,
+            content_preview,
+            raw_url,
+            notes,
+            tokenize='unicode61'
+        )
+        """
+    )
+    conn.executescript(
+        """
+        CREATE TRIGGER IF NOT EXISTS assets_fts_ai AFTER INSERT ON assets BEGIN
+            INSERT INTO assets_fts(
+                asset_id, title, install_name, source_repo, path,
+                content_preview, raw_url, notes
+            ) VALUES (
+                new.id, new.title, new.install_name, new.source_repo, new.path,
+                new.content_preview, new.raw_url, new.notes
+            );
+        END;
+        CREATE TRIGGER IF NOT EXISTS assets_fts_ad AFTER DELETE ON assets BEGIN
+            DELETE FROM assets_fts WHERE asset_id = old.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS assets_fts_au AFTER UPDATE ON assets BEGIN
+            DELETE FROM assets_fts WHERE asset_id = old.id;
+            INSERT INTO assets_fts(
+                asset_id, title, install_name, source_repo, path,
+                content_preview, raw_url, notes
+            ) VALUES (
+                new.id, new.title, new.install_name, new.source_repo, new.path,
+                new.content_preview, new.raw_url, new.notes
+            );
+        END;
+        """
+    )
+    count = conn.execute("SELECT COUNT(*) FROM assets_fts").fetchone()[0]
+    asset_count = conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
+    if asset_count and count < asset_count:
+        rebuild_assets_fts(conn)
+
+
+def rebuild_assets_fts(conn: sqlite3.Connection) -> None:
+    """Full rebuild of the FTS index from assets."""
+    conn.execute("DELETE FROM assets_fts")
+    conn.execute(
+        """
+        INSERT INTO assets_fts(
+            asset_id, title, install_name, source_repo, path,
+            content_preview, raw_url, notes
+        )
+        SELECT
+            id, title, install_name, source_repo, path,
+            content_preview, raw_url, notes
+        FROM assets
+        """
+    )
+    conn.commit()

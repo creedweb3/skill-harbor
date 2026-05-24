@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from studio.database import get_connection, row_to_dict
+from studio.safety import sanitize_for_log
 
 
 def _now_iso() -> str:
@@ -56,7 +57,7 @@ class JobLogger:
 
     def log(self, message: str, *, level: str = "info") -> None:
         self.check_cancel()
-        append_log(self.activity_id, message, level=level, kind="human")
+        append_log(self.activity_id, sanitize_for_log(message), level=level, kind="human")
 
     def dev(self, label: str, payload: Any) -> None:
         try:
@@ -65,7 +66,7 @@ class JobLogger:
             body = str(payload)
         append_log(
             self.activity_id,
-            f"{label}:\n{body}",
+            sanitize_for_log(f"{label}:\n{body}"),
             level="info",
             kind="dev",
         )
@@ -123,7 +124,7 @@ def start_activity(action: str, detail: str = "") -> int:
             INSERT INTO admin_activity (action, detail, status, progress, step, logs, meta_json)
             VALUES (?, ?, 'running', 0, 'Starting…', '[]', '{}')
             """,
-            (action, detail[:500]),
+            (action, sanitize_for_log(detail)[:500]),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -156,7 +157,12 @@ def append_log(
     level: str = "info",
     kind: str = "human",
 ) -> None:
-    line = {"ts": _now_iso(), "level": level, "message": message, "kind": kind}
+    line = {
+        "ts": _now_iso(),
+        "level": level,
+        "message": sanitize_for_log(message),
+        "kind": kind,
+    }
     with get_connection() as conn:
         row = conn.execute(
             "SELECT logs FROM admin_activity WHERE id = ?", (activity_id,)
@@ -192,7 +198,7 @@ def update_progress(
                 SET step = ?, progress = ?, detail = ?
                 WHERE id = ?
                 """,
-                (step[:200], max(0, min(99, progress)), detail[:500], activity_id),
+                (step[:200], max(0, min(99, progress)), sanitize_for_log(detail)[:500], activity_id),
             )
         else:
             conn.execute(
@@ -212,7 +218,8 @@ def finish_activity(
     snapshot_after: dict[str, Any] | None = None,
 ) -> bool:
     """Mark activity finished. Returns False if it was already stopped or finished."""
-    serialized = json.dumps(result_json, default=str) if result_json else ""
+    serialized = sanitize_for_log(json.dumps(result_json, default=str) if result_json else "")
+    safe_detail = sanitize_for_log(detail)[:2000]
     with get_connection() as conn:
         row = conn.execute(
             "SELECT status, meta_json FROM admin_activity WHERE id = ?", (activity_id,)
@@ -236,7 +243,7 @@ def finish_activity(
                 result_json = ?
             WHERE id = ? AND status = 'running'
             """,
-            (status, detail[:2000], progress, _now_iso(), serialized[:120_000], activity_id),
+            (status, safe_detail, progress, _now_iso(), serialized[:120_000], activity_id),
         )
         conn.commit()
         return cur.rowcount > 0

@@ -168,4 +168,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_asset_platforms_platform ON asset_platforms(platform)"
     )
+    from studio.database import ensure_assets_fts
+
+    ensure_assets_fts(conn)
     conn.commit()

@@ -1,8 +1,9 @@
-export type AppTab = "discovery" | "browse" | "installed" | "settings";
+export type AppTab = "discovery" | "browse" | "domains" | "installed" | "settings";
 
 const TABS: { id: AppTab; label: string; icon: string }[] = [
   { id: "discovery", label: "Discovery", icon: "◆" },
   { id: "browse", label: "Browse", icon: "▦" },
+  { id: "domains", label: "Domains", icon: "◇" },
   { id: "installed", label: "Installed", icon: "✓" },
   { id: "settings", label: "Settings", icon: "⚙" },
 ];

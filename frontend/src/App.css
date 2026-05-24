@@ -1487,36 +1487,44 @@ input[type="checkbox"] {
 }
 
 .trend-periods {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-family: var(--font-sans);
 }
 
 .period-pill {
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--muted);
-  padding: 0.35rem 0.8rem;
+  padding: 0.32rem 0.72rem;
   border-radius: var(--radius-full);
+  font-family: inherit;
   font-size: 0.75rem;
-  font-weight: 550;
+  font-weight: 600;
   cursor: pointer;
   transition:
     background 0.15s var(--ease),
     color 0.15s var(--ease),
-    border-color 0.15s var(--ease);
+    border-color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease);
 }
 
 .period-pill:hover {
   color: var(--text-secondary);
-  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .period-pill.active {
-  background: var(--accent-soft);
+  background: var(--surface-raised);
   color: var(--accent);
   border-color: rgba(217, 119, 87, 0.35);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .period-note {

@@ -1,4 +1,8 @@
-"""Remove duplicate registry rows and fix colliding display names."""
+"""Remove duplicate registry rows and fix colliding display names.
+
+Uses studio.path_filters for blocked paths (node_modules, vendor, dist, …)
+and prefers allowlisted skill-directory paths when merging identical content.
+"""
 
 from __future__ import annotations
 
@@ -6,20 +10,18 @@ from typing import Any
 
 from studio.database import get_connection
 from studio.naming import install_name_for, slugify, title_for
+from studio.path_filters import MIN_CONTENT_HASH_LEN, is_blocked_path, path_quality_key
 
 SOURCE_PRIORITY = {"manifest": 0, "custom": 1, "discovered": 2}
 
-SKIP_PATH_FRAGMENTS = ("/_template.", "/_template/", "rules/_template")
-
 
 def _should_skip_path(path: str) -> bool:
-    lower = path.replace("\\", "/").lower()
-    return any(f in lower for f in SKIP_PATH_FRAGMENTS)
+    return is_blocked_path(path)
 
 
 def dedupe_registry(*, fix_names: bool = True) -> dict[str, Any]:
     """Drop junk paths, identical content, and refresh install/title from paths."""
-    removed_templates = _remove_template_paths()
+    removed_templates = _remove_junk_paths()
     removed_content = _dedupe_by_content_hash()
     renamed = _fix_display_names() if fix_names else 0
     removed_install = _dedupe_by_install_name()
@@ -31,7 +33,7 @@ def dedupe_registry(*, fix_names: bool = True) -> dict[str, Any]:
     }
 
 
-def _remove_template_paths() -> int:
+def _remove_junk_paths() -> int:
     with get_connection() as conn:
         before = conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
         rows = conn.execute("SELECT id, path FROM assets").fetchall()
@@ -48,10 +50,11 @@ def _pick_keep_id(rows: list) -> str:
     best_key = None
     for row in rows:
         st = row["source_type"] or "discovered"
+        path_key = path_quality_key(str(row["path"] or ""))
         key = (
             SOURCE_PRIORITY.get(st, 9),
+            path_key,
             -(row["stars"] or 0),
-            len(row["path"] or ""),
             row["id"],
         )
         if best_key is None or key < best_key:
@@ -61,14 +64,17 @@ def _pick_keep_id(rows: list) -> str:
 
 
 def _dedupe_by_content_hash() -> int:
+    """Merge rows with the same content hash; skip empty or too-short hashes."""
     removed = 0
     with get_connection() as conn:
         shas = conn.execute(
             """
             SELECT content_sha256 FROM assets
-            WHERE content_sha256 IS NOT NULL AND content_sha256 != ''
+            WHERE content_sha256 IS NOT NULL
+              AND LENGTH(content_sha256) >= ?
             GROUP BY content_sha256 HAVING COUNT(*) > 1
-            """
+            """,
+            (MIN_CONTENT_HASH_LEN,),
         ).fetchall()
         for (sha,) in shas:
             rows = conn.execute(
