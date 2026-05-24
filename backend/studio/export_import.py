@@ -1,18 +1,18 @@
-"""Export / import Cursor .cursor folders as JSON backups."""
+"""Export / import agent skill folders as JSON backups (platform-aware)."""
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from studio import cursor_paths, installed
+from studio import installed, platform_paths
+from studio.platforms import DEFAULT_PLATFORM_ID, get_platform
 
-BUNDLE_VERSION = 1
+BUNDLE_VERSION = 2
 
 
-def _collect_scope(scope_root: Path, scope: str) -> dict[str, list[dict[str, Any]]]:
+def _collect_scope(scope_root: Path, spec) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {
         "skills": [],
         "rules": [],
@@ -22,12 +22,12 @@ def _collect_scope(scope_root: Path, scope: str) -> dict[str, list[dict[str, Any
     if not scope_root.is_dir():
         return out
 
-    skills_dir = scope_root / "skills"
+    skills_dir = scope_root / spec.skill_subdir
     if skills_dir.is_dir():
         for folder in sorted(skills_dir.iterdir()):
             if not folder.is_dir():
                 continue
-            md = folder / "SKILL.md"
+            md = folder / spec.skill_filename
             if not md.is_file():
                 continue
             text = installed.read_file(md)
@@ -40,7 +40,7 @@ def _collect_scope(scope_root: Path, scope: str) -> dict[str, list[dict[str, Any
                     }
                 )
 
-    rules_dir = scope_root / "rules"
+    rules_dir = scope_root / spec.rules_subdir
     if rules_dir.is_dir():
         for f in sorted(rules_dir.iterdir()):
             if f.is_file() and f.suffix.lower() in {".mdc", ".md"}:
@@ -54,7 +54,7 @@ def _collect_scope(scope_root: Path, scope: str) -> dict[str, list[dict[str, Any
                         }
                     )
 
-    for key, sub in (("commands", "commands"), ("agents", "agents")):
+    for key, sub in (("commands", spec.commands_subdir), ("agents", spec.agents_subdir)):
         d = scope_root / sub
         if d.is_dir():
             for f in sorted(d.iterdir()):
@@ -71,13 +71,22 @@ def _collect_scope(scope_root: Path, scope: str) -> dict[str, list[dict[str, Any
     return out
 
 
-def export_bundle(*, user: bool, project_dir: Path) -> dict[str, Any]:
+def export_bundle(
+    *,
+    user: bool,
+    project_dir: Path,
+    platform_id: str = DEFAULT_PLATFORM_ID,
+) -> dict[str, Any]:
+    spec = get_platform(platform_id)
     scopes: dict[str, Any] = {}
     if user:
-        scopes["user"] = _collect_scope(cursor_paths.user_cursor_root(), "user")
-    scopes["project"] = _collect_scope(cursor_paths.project_cursor_root(project_dir), "project")
+        scopes["user"] = _collect_scope(platform_paths.user_root(platform_id), spec)
+    scopes["project"] = _collect_scope(
+        platform_paths.project_root(project_dir, platform_id), spec
+    )
     return {
         "version": BUNDLE_VERSION,
+        "platform": spec.id,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "scopes": scopes,
     }
@@ -89,19 +98,14 @@ def _write_items(
     items: list[dict[str, Any]],
     *,
     force: bool,
-    name_key: str = "name",
 ) -> list[str]:
     written: list[str] = []
     target = base / folder
     target.mkdir(parents=True, exist_ok=True)
     for item in items:
-        name = item[name_key]
-        dest = target / name
-        if dest.is_dir():
-            dest = dest / "SKILL.md"
+        dest = target / item["name"]
         if dest.exists() and not force:
             continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(item["content"], encoding="utf-8", newline="\n")
         written.append(str(dest))
     return written
@@ -114,37 +118,38 @@ def import_bundle(
     import_project: bool,
     project_dir: Path,
     force: bool,
+    platform_id: str | None = None,
 ) -> dict[str, Any]:
+    spec = get_platform(platform_id or bundle.get("platform") or DEFAULT_PLATFORM_ID)
     scopes = bundle.get("scopes") or {}
     result: dict[str, list[str]] = {"user": [], "project": []}
 
-    if import_user and "user" in scopes:
-        data = scopes["user"]
-        base = cursor_paths.user_cursor_root()
-        for skill in data.get("skills", []):
-            d = base / "skills" / skill["name"] / "SKILL.md"
-            d.parent.mkdir(parents=True, exist_ok=True)
-            if d.exists() and not force:
-                continue
-            d.write_text(skill["content"], encoding="utf-8", newline="\n")
-            result["user"].append(str(d))
-        result["user"].extend(_write_items(base, "rules", data.get("rules", []), force=force))
-        result["user"].extend(_write_items(base, "commands", data.get("commands", []), force=force))
-        result["user"].extend(_write_items(base, "agents", data.get("agents", []), force=force))
-
-    if import_project and "project" in scopes:
-        data = scopes["project"]
-        base = cursor_paths.project_cursor_root(project_dir)
+    def _import_scope(data: dict[str, Any], base: Path, scope_key: str) -> None:
         base.mkdir(parents=True, exist_ok=True)
         for skill in data.get("skills", []):
-            d = base / "skills" / skill["name"] / "SKILL.md"
+            d = base / spec.skill_subdir / skill["name"] / spec.skill_filename
             d.parent.mkdir(parents=True, exist_ok=True)
             if d.exists() and not force:
                 continue
             d.write_text(skill["content"], encoding="utf-8", newline="\n")
-            result["project"].append(str(d))
-        result["project"].extend(_write_items(base, "rules", data.get("rules", []), force=force))
-        result["project"].extend(_write_items(base, "commands", data.get("commands", []), force=force))
-        result["project"].extend(_write_items(base, "agents", data.get("agents", []), force=force))
+            result[scope_key].append(str(d))
+        result[scope_key].extend(
+            _write_items(base, spec.rules_subdir, data.get("rules", []), force=force)
+        )
+        result[scope_key].extend(
+            _write_items(base, spec.commands_subdir, data.get("commands", []), force=force)
+        )
+        result[scope_key].extend(
+            _write_items(base, spec.agents_subdir, data.get("agents", []), force=force)
+        )
 
-    return {"imported": result}
+    if import_user and "user" in scopes:
+        _import_scope(scopes["user"], platform_paths.user_root(spec.id), "user")
+    if import_project and "project" in scopes:
+        _import_scope(
+            scopes["project"],
+            platform_paths.project_root(project_dir, spec.id),
+            "project",
+        )
+
+    return {"imported": result, "platform": spec.id}

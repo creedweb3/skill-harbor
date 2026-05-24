@@ -112,7 +112,7 @@ export function DiscoveryDashboard({
             . Fetch the catalog for live GitHub stars, update dates, and install.
           </p>
           <Button variant="primary" size="sm" onClick={() => fetchCatalog()} disabled={busy}>
-            {busy ? "Fetching…" : "Fetch catalog"}
+            {busy ? "Loading…" : "Reload catalog"}
           </Button>
         </div>
       ) : null}

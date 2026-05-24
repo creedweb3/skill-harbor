@@ -1,4 +1,4 @@
-import type { Asset } from "../../api";
+import type { Asset, PlatformInfo } from "../../api";
 import { AssetCard } from "./AssetCard";
 
 type Props = {
@@ -8,6 +8,8 @@ type Props = {
   busy: boolean;
   onFetch: () => void;
   onToggle: (id: string) => void;
+  platforms?: PlatformInfo[];
+  activePlatform?: string;
 };
 
 export function CatalogGrid({
@@ -17,6 +19,8 @@ export function CatalogGrid({
   busy,
   onFetch,
   onToggle,
+  platforms,
+  activePlatform,
 }: Props) {
   if (assets.length === 0) {
     return (
@@ -31,11 +35,12 @@ export function CatalogGrid({
             <p className="empty-title">Get started</p>
             <ol className="steps">
               <li>Pick categories and fetch options below</li>
-              <li>Click <strong>Fetch catalog</strong> to load skills from GitHub</li>
+              <li>Catalog loads from your local registry automatically</li>
+              <li>Use <strong>Sync registry</strong> in the top bar to refresh from GitHub</li>
               <li>Select items and install to global or project scope</li>
             </ol>
             <button type="button" className="btn primary" onClick={onFetch} disabled={busy}>
-              {busy ? "Working…" : "Fetch catalog"}
+              {busy ? "Working…" : "Reload catalog"}
             </button>
           </>
         )}
@@ -51,6 +56,8 @@ export function CatalogGrid({
             asset={a}
             selected={selectedIds.has(a.id)}
             onToggle={() => onToggle(a.id)}
+            platforms={platforms}
+            activePlatform={activePlatform}
           />
         </li>
       ))}

@@ -5,8 +5,11 @@ import {
   getAdminActivity,
   getAdminActivityRunning,
   getAdminDashboard,
+  getDiscoverySettings,
   getRegistrySettings,
+  patchDiscoverySettings,
   patchRegistrySettings,
+  type DiscoveryUiConfig,
   postAdminRefreshStars,
   postAdminRegistryDedupe,
   postAdminRegistryExpand,
@@ -134,6 +137,7 @@ export function AdminPage({ githubTokenSet, onLogout, onGithubTokenSaved, patchG
   const [customRepo, setCustomRepo] = useState("");
   const [lastOp, setLastOp] = useState("");
   const [minRepoStars, setMinRepoStars] = useState("5000");
+  const [discoveryJson, setDiscoveryJson] = useState("");
   const [stopping, setStopping] = useState(false);
 
   const stopRunningJob = async (activityId?: number) => {
@@ -191,6 +195,21 @@ export function AdminPage({ githubTokenSet, onLogout, onGithubTokenSaved, patchG
       setRunningJob(run.job);
     } catch (e) {
       errors.push(`Activity: ${formatErr(e)}`);
+    }
+
+    try {
+      const disc = await getDiscoverySettings();
+      setDiscoveryJson(JSON.stringify(disc.discovery_ui, null, 2));
+    } catch (e) {
+      errors.push(`Discovery UI: ${formatErr(e)}`);
+    }
+
+    try {
+      const reg = await getRegistrySettings();
+      const min = reg.settings.find((s) => s.key === "min_repo_stars");
+      if (min) setMinRepoStars(String(min.value));
+    } catch {
+      /* optional */
     }
 
     setBanner(errors.length ? { kind: "err", text: errors.join(" · ") } : null);
@@ -574,6 +593,45 @@ export function AdminPage({ githubTokenSet, onLogout, onGithubTokenSaved, patchG
                 }
               >
                 Apply
+              </Button>
+            </div>
+          </section>
+
+          <section className="admin-panel admin-panel--discovery">
+            <div className="admin-panel-head">
+              <h2>Discovery panel</h2>
+              <p className="admin-panel-desc">
+                Layout and limits for the public Discovery page (stored in DB — no redeploy). Template:{" "}
+                <code>config/discovery-ui.default.json</code>. After taxonomy changes, run{" "}
+                <strong>Reclassify</strong> above.
+              </p>
+            </div>
+            <div className="admin-discovery-editor">
+              <label className="admin-discovery-editor__label" htmlFor="discovery-ui-json">
+                Configuration
+                <span className="admin-discovery-editor__format">JSON</span>
+              </label>
+              <textarea
+                id="discovery-ui-json"
+                className="admin-discovery-editor__textarea"
+                rows={16}
+                value={discoveryJson}
+                onChange={(e) => setDiscoveryJson(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <div className="admin-discovery-actions">
+              <Button
+                variant="primary"
+                disabled={busy || !!runningJob || !discoveryJson.trim()}
+                onClick={() =>
+                  run("Save discovery UI", async () => {
+                    const parsed = JSON.parse(discoveryJson) as DiscoveryUiConfig;
+                    await patchDiscoverySettings(parsed);
+                  })
+                }
+              >
+                Apply discovery UI
               </Button>
             </div>
           </section>

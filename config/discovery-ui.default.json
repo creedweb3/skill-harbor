@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "layout": { "columns": 3, "rows": 2 },
+  "limits": {
+    "profession_domain_count": 6,
+    "items_per_domain": 6,
+    "trending_limit": 9,
+    "for_you_limit": 9
+  },
+  "profession_domains": [
+    "agent-ai",
+    "backend-apis",
+    "web-frameworks",
+    "testing-security",
+    "devops-infra",
+    "growth-seo"
+  ],
+  "rotate_domains": false,
+  "rotation_week_offset": 0
+}

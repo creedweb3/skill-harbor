@@ -71,9 +71,39 @@ const PERIOD_DESC: Record<TrendPeriod, string> = {
   all: "Highest-star GitHub repos in the registry — one card per repository.",
 };
 
-export const TRENDING_LIMIT = 9;
-export const DOMAIN_LIMIT = 5;
-export const FOR_YOU_LIMIT = 9;
+export type DiscoveryUiConfig = {
+  version?: number;
+  layout?: { columns?: number; rows?: number };
+  limits?: {
+    profession_domain_count?: number;
+    items_per_domain?: number;
+    trending_limit?: number;
+    for_you_limit?: number;
+  };
+  profession_domains?: string[];
+  rotate_domains?: boolean;
+  rotation_week_offset?: number;
+};
+
+export const DEFAULT_DISCOVERY_UI: DiscoveryUiConfig = {
+  layout: { columns: 3, rows: 2 },
+  limits: {
+    profession_domain_count: 6,
+    items_per_domain: 6,
+    trending_limit: 9,
+    for_you_limit: 9,
+  },
+};
+
+export function discoveryLimits(cfg?: DiscoveryUiConfig | null) {
+  const limits = { ...DEFAULT_DISCOVERY_UI.limits, ...cfg?.limits };
+  return {
+    trending: limits.trending_limit ?? 9,
+    forYou: limits.for_you_limit ?? 9,
+    itemsPerDomain: limits.items_per_domain ?? 6,
+    professionCount: limits.profession_domain_count ?? 6,
+  };
+}
 
 function itemFromAsset(asset: Asset, domain: string, rank = 99): DashboardItem {
   return {
@@ -108,7 +138,8 @@ function repoTrendToItem(trend: RepoTrend, rank: number): DashboardItem {
 
 function buildForYouFiles(
   assets: Asset[],
-  installedItems: InstalledRow[]
+  installedItems: InstalledRow[],
+  forYouLimit: number
 ): { items: DashboardItem[]; uniqueRepoCount: number } {
   const installedNames = new Set(
     installedItems.map(({ item }) => item.name.toLowerCase())
@@ -130,7 +161,8 @@ function buildForYouFiles(
     const seen = new Set<string>();
     for (const domain of installedDomains) {
       for (const asset of assets) {
-        if (!(asset.domains ?? asset.categories).includes(domain)) continue;
+        const dom = asset.primary_domain ?? (asset.domains ?? asset.categories)[0];
+        if (dom !== domain) continue;
         if (installedNames.has(asset.install_name.toLowerCase())) continue;
         if (seen.has(asset.id)) continue;
         seen.add(asset.id);
@@ -138,13 +170,13 @@ function buildForYouFiles(
       }
     }
     ranked = pickDiverseFiles(domainPool, {
-      limit: FOR_YOU_LIMIT,
+      limit: forYouLimit,
       maxPerRepo: 1,
       compare: compareAssetsForYou,
     });
   } else {
     ranked = pickDiverseFiles(assets, {
-      limit: FOR_YOU_LIMIT,
+      limit: forYouLimit,
       maxPerRepo: 1,
       compare: compareAssetsForYou,
     });
@@ -162,10 +194,14 @@ function buildForYouFiles(
   };
 }
 
-function buildDomainFiles(assets: Asset[], domain: string): DashboardItem[] {
+function buildDomainFiles(
+  assets: Asset[],
+  domain: string,
+  limit: number
+): DashboardItem[] {
   return pickDiverseFiles(assets, {
     domain,
-    limit: DOMAIN_LIMIT,
+    limit,
     maxPerRepo: 1,
   }).map((asset, i) => itemFromAsset(asset, domain, i + 1));
 }
@@ -175,10 +211,16 @@ export function buildDiscoverySections(
   _leaderboards: LeaderboardsResponse | null,
   assets: Asset[],
   installedItems: InstalledRow[],
-  trendPeriod: TrendPeriod
+  trendPeriod: TrendPeriod,
+  discoveryUi?: DiscoveryUiConfig | null
 ): DiscoverySection[] {
-  const repoTrends = assets.length ? buildRepoTrends(assets, trendPeriod, TRENDING_LIMIT) : [];
-  const forYou = assets.length ? buildForYouFiles(assets, installedItems) : { items: [], uniqueRepoCount: 0 };
+  const lim = discoveryLimits(discoveryUi);
+  const repoTrends = assets.length
+    ? buildRepoTrends(assets, trendPeriod, lim.trending)
+    : [];
+  const forYou = assets.length
+    ? buildForYouFiles(assets, installedItems, lim.forYou)
+    : { items: [], uniqueRepoCount: 0 };
 
   const sections: DiscoverySection[] = [
     {
@@ -207,7 +249,9 @@ export function buildDiscoverySections(
   ];
 
   for (const prof of professions) {
-    const items = assets.length ? buildDomainFiles(assets, prof.domain) : [];
+    const items = assets.length
+      ? buildDomainFiles(assets, prof.domain, lim.itemsPerDomain)
+      : [];
     if (items.length === 0) continue;
     sections.push({
       kind: "profession",

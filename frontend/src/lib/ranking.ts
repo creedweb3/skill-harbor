@@ -190,12 +190,10 @@ function filterPool(assets: Asset[], opts: PickFilesOptions): Asset[] {
   let pool = assets;
   if (opts.domain) {
     const domain = opts.domain;
-    pool = pool.filter(
-      (a) =>
-        a.primary_domain === domain ||
-        (a.domains ?? a.categories).includes(domain) ||
-        (a.secondary_domains ?? []).includes(domain)
-    );
+    pool = pool.filter((a) => {
+      const primary = a.primary_domain ?? (a.domains ?? a.categories)[0];
+      return primary === domain;
+    });
   }
   if (opts.excludeInstallNames?.size) {
     pool = pool.filter((a) => !opts.excludeInstallNames!.has(a.install_name.toLowerCase()));

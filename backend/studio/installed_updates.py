@@ -1,4 +1,4 @@
-"""Detect registry updates for installed Cursor skills/rules."""
+"""Detect registry updates for installed agent assets (platform-aware)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from studio import cursor_paths, installed
+from studio import installed, platform_paths
 from studio.database import get_connection
+from studio.platforms import DEFAULT_PLATFORM_ID
 
 
 def content_hash(text: str) -> str:
@@ -44,9 +45,12 @@ def _match_registry_row(
     return None
 
 
-def check_installed_updates(project_dir: Path) -> list[dict[str, Any]]:
-    user_root = cursor_paths.user_cursor_root()
-    project_root = cursor_paths.project_cursor_root(project_dir)
+def check_installed_updates(
+    project_dir: Path,
+    platform_id: str = DEFAULT_PLATFORM_ID,
+) -> list[dict[str, Any]]:
+    user_root = platform_paths.user_root(platform_id)
+    project_root = platform_paths.project_root(project_dir, platform_id)
     index = installed.build_install_index(user_root, project_root)
     updates: list[dict[str, Any]] = []
 
@@ -78,7 +82,8 @@ def check_installed_updates(project_dir: Path) -> list[dict[str, Any]]:
                     "registry_asset_id": row["id"],
                     "registry_title": row.get("title") or name,
                     "source_repo": row.get("source_repo", ""),
-                    "stars": int(row.get("stars") or 0),
+                    "stars": row.get("stars", 0),
+                    "platform": platform_id,
                 }
             )
     return updates

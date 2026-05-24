@@ -1,10 +1,12 @@
 # Skill Harbor — Architecture
 
-**By Devs, For Devs** — an open-source, local-first marketplace for Cursor agent skills, rules, commands, and subagents.
+**By Devs, For Devs** — an open-source, local-first marketplace for agent skills, rules, commands, and subagents across **Cursor, Claude Code, Codex, Gemini, Antigravity**, and other filesystem-based agents.
 
 ## Vision
 
-Skill Harbor is not a one-off script. It is the registry layer developers deserve: discover vetted community assets, **read full content before install**, sync from GitHub on your schedule, and install to Cursor with confidence.
+Skill Harbor is not a one-off script. It is the registry layer developers deserve: discover vetted community assets, **read full content before install**, sync from GitHub on your schedule, and install to **your chosen agent/IDE** with confidence.
+
+**v2** adds a platform abstraction (`backend/studio/platforms.py`, `platform_paths.py`) so one catalog can target multiple install roots. See [PLATFORMS.md](./PLATFORMS.md).
 
 ## System layers
 
@@ -20,9 +22,9 @@ Skill Harbor is not a one-off script. It is the registry layer developers deserv
 └───────────┬─────────────────────────────┬─────────────────────┘
             │                             │
 ┌───────────▼──────────┐    ┌───────────▼─────────────────────┐
-│  Harbor DB (SQLite)    │    │  Cursor filesystem              │
-│  assets · domains      │    │  ~/.cursor/skills · .cursor/    │
-│  sync_runs             │    │  rules · commands · agents      │
+│  Harbor DB (SQLite)    │    │  Agent filesystem (per platform)│
+│  assets · domains      │    │  ~/.cursor · ~/.claude · …      │
+│  sync_runs             │    │  skills · rules · commands      │
 └───────────┬────────────┘    └─────────────────────────────────┘
             │
 ┌───────────▼────────────┐
@@ -50,7 +52,8 @@ Asset ID: `{owner}/{repo}::{path}` — stable across syncs.
 | POST | `/api/sync` | Refresh content/metadata from GitHub |
 | GET | `/api/sync/status` | Last sync run |
 | GET | `/api/leaderboards` | Trending / domains from DB |
-| POST | `/api/install` | Write selected assets to Cursor paths |
+| GET | `/api/platforms` | Supported agents/IDEs and install roots |
+| POST | `/api/install` | Write selected assets (optional `platform`) |
 | GET/PATCH | `/api/settings` | Project dir, token (local config.json) |
 
 **Removed from UX:** “Fetch catalog” live scrape on every browse. Reads are DB-first; **Sync registry** is explicit.
@@ -61,6 +64,20 @@ Asset ID: `{owner}/{repo}::{path}` — stable across syncs.
 - Config: `~/.cursor-skills-studio/config.json` (GitHub token never sent to third parties)
 - No telemetry in core OSS build
 - All install operations are local filesystem writes
+
+## Discovery UI (admin-configurable)
+
+Discovery layout and limits are stored in `app_settings.discovery_ui` (JSON). Defaults: `config/discovery-ui.default.json`. Admins edit via **Admin → Discovery panel** (no UI redeploy).
+
+| Key | Meaning |
+|-----|---------|
+| `layout.columns` / `layout.rows` | Cards per category (default 3×2) |
+| `limits.items_per_domain` | Top skills per category (default 6) |
+| `limits.profession_domain_count` | Category columns on Discovery (default 6) |
+| `profession_domains` | Ordered domain slugs |
+| `rotate_domains` | Weekly rotation through the domain list |
+
+Taxonomy assigns **one** `primary_domain` per asset. Run **Reclassify** after rule changes.
 
 ## Future (OSS → SaaS path)
 

@@ -63,9 +63,17 @@ DOMAIN_CATEGORIES: dict[str, list[str]] = {
     ],
     "backend-apis": [
         "backend",
-        "api",
+        " api ",
+        "rest api",
+        "api design",
+        "api-design",
+        "openapi",
+        "swagger",
         "rest",
         "graphql",
+        "grpc",
+        "endpoint",
+        "microservice",
         "node",
         "express",
         "fastapi",
@@ -73,9 +81,7 @@ DOMAIN_CATEGORIES: dict[str, list[str]] = {
         "flask",
         "nestjs",
         "spring",
-        "microservice",
         "server",
-        "grpc",
     ],
     "testing-security": [
         "test",
@@ -108,16 +114,19 @@ DOMAIN_CATEGORIES: dict[str, list[str]] = {
         "infra",
     ],
     "design-ux": [
-        "design",
-        "ui",
-        "ux",
+        "ui design",
+        "ux design",
+        "user experience",
+        "user interface",
         "figma",
         "wireframe",
         "typography",
         "accessibility",
         "a11y",
-        "brand",
+        "brand voice",
         "design system",
+        "visual design",
+        "mockup",
     ],
     "growth-seo": [
         "seo",
@@ -408,10 +417,28 @@ def build_classification_blob(
     return blob, path_norm
 
 
+# Strong signals for one domain only (avoid "api design" → design-ux).
+_DOMAIN_DISAMBIGUATION: list[tuple[re.Pattern[str], str, float]] = [
+    (re.compile(r"\bapi[- ]?design\b", re.I), "backend-apis", 12.0),
+    (re.compile(r"\b(rest|graphql|grpc|openapi|swagger)\b.*\bapi\b", re.I), "backend-apis", 8.0),
+    (re.compile(r"\bapi\b.*\b(rest|graphql|grpc|endpoint|schema)\b", re.I), "backend-apis", 8.0),
+    (re.compile(r"\b(figma|wireframe|a11y|accessibility|brand voice|design system)\b", re.I), "design-ux", 10.0),
+    (re.compile(r"\b(ui|ux)\s+(design|research|audit)\b", re.I), "design-ux", 9.0),
+    (re.compile(r"\bseo\b|\baeo\b|\bjson-ld\b", re.I), "growth-seo", 8.0),
+    (re.compile(r"\bplaywright\b|\bvitest\b|\bowasp\b", re.I), "testing-security", 7.0),
+]
+
+
 def _score_domains(blob: str, path: str, manifest_category: str | None) -> list[tuple[str, float]]:
     scores: list[tuple[str, float]] = []
     for domain, keywords in DOMAIN_CATEGORIES.items():
-        hits = sum(1 for kw in keywords if kw in blob)
+        hits = 0
+        for kw in keywords:
+            if len(kw.strip()) <= 4 and not kw.startswith(" "):
+                if re.search(rf"\b{re.escape(kw.strip())}\b", blob):
+                    hits += 1
+            elif kw in blob:
+                hits += 1
         if hits:
             scores.append((domain, float(hits) * 2.0))
     for pattern, domain in _PATH_DOMAIN_HINTS:
@@ -424,16 +451,24 @@ def _score_domains(blob: str, path: str, manifest_category: str | None) -> list[
     return scores
 
 
+def _apply_domain_disambiguation(blob: str, merged: dict[str, float]) -> None:
+    for pattern, domain, boost in _DOMAIN_DISAMBIGUATION:
+        if pattern.search(blob):
+            merged[domain] = merged.get(domain, 0) + boost
+    # "api design" / backend API context — suppress visual-design bucket
+    if merged.get("backend-apis", 0) >= 6 and merged.get("design-ux", 0) > 0:
+        if not re.search(r"\b(figma|wireframe|a11y|brand voice|design system|ui kit)\b", blob, re.I):
+            merged["design-ux"] = merged["design-ux"] * 0.15
+
+
 def classify_asset(
     text: str, path: str = "", manifest_category: str | None = None
 ) -> ClassifyResult:
+    """Assign exactly one primary domain per asset (no secondary overlap)."""
     blob, path_norm = build_classification_blob(text, path, manifest_category)
     scores = _score_domains(blob, path_norm, manifest_category)
 
     if not scores:
-        token = re.search(r"name:\s*([a-z0-9-]+)", blob)
-        if token:
-            return ClassifyResult("docs-workflow", [])
         return ClassifyResult("docs-workflow", [])
 
     merged: dict[str, float] = {}
@@ -441,16 +476,11 @@ def classify_asset(
         d = normalize_domain(domain)
         merged[d] = merged.get(d, 0) + score
 
+    _apply_domain_disambiguation(blob, merged)
+
     ranked = sorted(merged.items(), key=lambda x: x[1], reverse=True)
     primary = ranked[0][0]
-    top = ranked[0][1]
-    secondary: list[str] = []
-    for domain, score in ranked[1:]:
-        if score >= max(1.0, top * 0.45) and domain != primary:
-            secondary.append(domain)
-        if len(secondary) >= 2:
-            break
-    return ClassifyResult(primary, secondary)
+    return ClassifyResult(primary, [])
 
 
 def classify_tech_tags(text: str, path: str = "", limit: int = 5) -> list[str]:
@@ -474,10 +504,9 @@ def classify_tech_tags(text: str, path: str = "", limit: int = 5) -> list[str]:
 
 
 def classify_domains(text: str, path: str = "", manifest_category: str | None = None) -> list[str]:
-    """Backward-compatible: primary + up to 2 secondary."""
+    """Backward-compatible: single domain only."""
     r = classify_asset(text, path, manifest_category)
-    out = [r.primary_domain, *r.secondary_domains]
-    return out[:3]
+    return [r.primary_domain]
 
 
 def detect_asset_type(path: str) -> str:

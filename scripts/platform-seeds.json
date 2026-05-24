@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Seed repositories for multi-platform agent asset discovery",
+  "seeds": [
+    {
+      "owner": "PatrickJS",
+      "repo": "awesome-cursorrules",
+      "kind": "rules",
+      "platforms": ["cursor"]
+    },
+    {
+      "owner": "spencerpauly",
+      "repo": "awesome-cursor-skills",
+      "kind": "skills",
+      "platforms": ["cursor"]
+    },
+    {
+      "owner": "anthropics",
+      "repo": "skills",
+      "kind": "skills",
+      "platforms": ["cursor", "claude", "codex"]
+    },
+    {
+      "owner": "vercel-labs",
+      "repo": "agent-skills",
+      "kind": "skills",
+      "platforms": ["cursor", "claude", "codex"]
+    },
+    {
+      "owner": "openai",
+      "repo": "codex",
+      "kind": "skills",
+      "platforms": ["codex"]
+    },
+    {
+      "owner": "google-gemini",
+      "repo": "gemini-cli",
+      "kind": "skills",
+      "platforms": ["gemini"]
+    }
+  ]
+}

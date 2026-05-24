@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from studio.database import get_connection
+from studio.discovery_config import DEFAULT_DISCOVERY_UI
 
 # Defaults used when key missing (seeded on bootstrap)
 DEFAULTS: dict[str, tuple[Any, str, str]] = {
@@ -24,6 +25,11 @@ DEFAULTS: dict[str, tuple[Any, str, str]] = {
     "max_repos_per_evolve": (30, "int", "Max repos to crawl per evolve/crawl batch"),
     "crawl_batch_size": (30, "int", "Repos to crawl from discovery queue per batch"),
     "crawl_cooldown_hours": (168, "int", "Hours before re-crawling the same repo (7 days)"),
+    "discovery_ui": (
+        DEFAULT_DISCOVERY_UI,
+        "json",
+        "Discovery panel layout, limits, and profession domain order (JSON)",
+    ),
 }
 
 _cache: dict[str, Any] = {}

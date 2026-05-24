@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "description": "Skill Harbor v2 — supported agent platforms and install roots",
+  "default_platform": "cursor",
+  "platforms": [
+    {
+      "id": "cursor",
+      "label": "Cursor",
+      "status": "stable",
+      "global": "~/.cursor",
+      "project": "<repo>/.cursor"
+    },
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "status": "stable",
+      "global": "~/.claude",
+      "project": "<repo>/.claude"
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "status": "stable",
+      "global": "~/.codex",
+      "project": "<repo>/.codex"
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "status": "beta",
+      "global": "~/.gemini",
+      "project": "<repo>/.gemini"
+    },
+    {
+      "id": "antigravity",
+      "label": "Antigravity",
+      "status": "beta",
+      "global": "~/.agent",
+      "project": "<repo>/.agent"
+    },
+    {
+      "id": "windsurf",
+      "label": "Windsurf",
+      "status": "beta",
+      "global": "~/.codeium",
+      "project": "<repo>/.windsurf"
+    },
+    {
+      "id": "cline",
+      "label": "Cline",
+      "status": "beta",
+      "global": "~/.cline",
+      "project": "<repo>/.cline"
+    },
+    {
+      "id": "copilot",
+      "label": "GitHub Copilot",
+      "status": "planned",
+      "global": "~/.github",
+      "project": "<repo>/.github"
+    },
+    {
+      "id": "continue",
+      "label": "Continue",
+      "status": "planned",
+      "global": "~/.continue",
+      "project": "<repo>/.continue"
+    },
+    {
+      "id": "aider",
+      "label": "Aider",
+      "status": "planned",
+      "global": "~/.aider",
+      "project": "<repo>/.aider"
+    }
+  ]
+}

@@ -18,6 +18,8 @@ export function CustomSearchView({ studio }: Props) {
     selectAllCats,
     clearCats,
     toggleRow,
+    platforms,
+    platform,
   } = studio;
 
   return (
@@ -40,6 +42,8 @@ export function CustomSearchView({ studio }: Props) {
           busy={busy}
           onFetch={fetchCatalog}
           onToggle={toggleRow}
+          platforms={platforms}
+          activePlatform={platform}
         />
       </section>
     </div>

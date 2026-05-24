@@ -134,3 +134,67 @@ def get_last_stars_refresh_iso() -> str | None:
     from datetime import datetime, timezone
 
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def get_default_platform() -> str:
+    from studio.platforms import DEFAULT_PLATFORM_ID
+
+    raw = load_config().get("default_platform")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip().lower()
+    return DEFAULT_PLATFORM_ID
+
+
+def set_default_platform(platform_id: str) -> str:
+    from studio.platforms import get_platform
+
+    spec = get_platform(platform_id)
+    cfg = load_config()
+    cfg["default_platform"] = spec.id
+    save_config(cfg)
+    return spec.id
+
+
+def get_platform_mode() -> str:
+    mode = load_config().get("platform_mode", "auto")
+    return mode if mode in ("auto", "manual") else "auto"
+
+
+def set_platform_mode(mode: str) -> str:
+    m = mode if mode in ("auto", "manual") else "auto"
+    cfg = load_config()
+    cfg["platform_mode"] = m
+    save_config(cfg)
+    return m
+
+
+def get_extra_install_platforms() -> list[str]:
+    raw = load_config().get("extra_install_platforms")
+    if isinstance(raw, list):
+        return [str(p).lower() for p in raw if p]
+    return []
+
+
+def set_extra_install_platforms(platform_ids: list[str]) -> list[str]:
+    from studio.platforms import get_platform
+
+    out: list[str] = []
+    for pid in platform_ids:
+        out.append(get_platform(pid).id)
+    cfg = load_config()
+    cfg["extra_install_platforms"] = out
+    save_config(cfg)
+    return out
+
+
+def resolve_active_platform(project_dir: Path | None = None) -> str:
+    """Manual default, or auto-detect from filesystem when mode is auto."""
+    if get_platform_mode() == "manual":
+        return get_default_platform()
+    from pathlib import Path as P
+
+    from studio.platform_detect import detect_installed_platforms
+
+    proj = project_dir or get_project_dir()
+    detection = detect_installed_platforms(P(proj))
+    return detection.get("recommended_platform") or get_default_platform()

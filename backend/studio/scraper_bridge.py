@@ -13,7 +13,10 @@ if str(_SCRIPTS) not in sys.path:
 
 import scrape_cursor_github as scraper  # noqa: E402
 
-from studio import cursor_paths, installed, stars_cache, taxonomy  # noqa: E402
+from studio import installed, platform_paths, stars_cache, taxonomy  # noqa: E402
+from studio.install_cache import get_install_index  # noqa: E402
+from studio.platforms import DEFAULT_PLATFORM_ID, get_platform  # noqa: E402
+from studio.platform_write import write_asset_for_platform
 
 CURATED_PATH = _SCRIPTS / "cursor-curated-skills.json"
 CURATED_RULES_PATH = _SCRIPTS / "cursor-curated-rules.json"
@@ -43,11 +46,65 @@ def asset_to_dict(asset: scraper.Asset) -> dict[str, Any]:
     return d
 
 
+_ASSET_FIELDS = frozenset(
+    {
+        "source_repo",
+        "source_path",
+        "asset_type",
+        "categories",
+        "score",
+        "stars",
+        "content_sha256",
+        "content_preview",
+        "install_name",
+        "raw_url",
+        "curated",
+        "curated_rank",
+        "curated_title",
+        "repo_pushed_at",
+    }
+)
+
+
+def _resolve_content_sha256(data: dict[str, Any], fields: dict[str, Any]) -> str:
+    sha = (fields.get("content_sha256") or data.get("content_sha256") or "").strip()
+    if sha:
+        return sha
+    content = data.get("content") or data.get("_content") or ""
+    if content:
+        return scraper.content_hash(content)
+    preview = fields.get("content_preview") or data.get("content_preview") or ""
+    if preview:
+        return scraper.content_hash(preview)
+    return ""
+
+
 def dict_to_asset(data: dict[str, Any]) -> scraper.Asset:
-    fields = {k: v for k, v in data.items() if k not in ("id", "domains", "install_status", "asset_type_label")}
+    fields = {k: v for k, v in data.items() if k in _ASSET_FIELDS}
+    if "categories" not in fields:
+        fields["categories"] = list(data.get("domains") or data.get("categories") or [])
+    fields["content_sha256"] = _resolve_content_sha256(data, fields)
+    defaults: dict[str, Any] = {
+        "source_repo": "",
+        "source_path": "",
+        "asset_type": "skill",
+        "categories": [],
+        "score": 0.0,
+        "stars": 0,
+        "content_preview": "",
+        "install_name": "",
+        "raw_url": "",
+        "curated": False,
+        "curated_rank": 99,
+        "curated_title": "",
+        "repo_pushed_at": "",
+    }
+    for key, default in defaults.items():
+        fields.setdefault(key, default)
     asset = scraper.Asset(**fields)
-    if "_content" in data:
-        setattr(asset, "_content", data["_content"])
+    content = data.get("content") or data.get("_content")
+    if content:
+        setattr(asset, "_content", content)
     return asset
 
 
@@ -76,10 +133,14 @@ def list_category_meta() -> dict[str, Any]:
     }
 
 
-def enrich_assets(assets: list[scraper.Asset], project_dir: Path) -> list[dict[str, Any]]:
-    index = installed.build_install_index(
-        cursor_paths.user_cursor_root(),
-        cursor_paths.project_cursor_root(project_dir),
+def enrich_assets(
+    assets: list[scraper.Asset],
+    project_dir: Path,
+    platform_id: str = DEFAULT_PLATFORM_ID,
+) -> list[dict[str, Any]]:
+    index = get_install_index(
+        platform_paths.user_root(platform_id),
+        platform_paths.project_root(project_dir, platform_id),
     )
     out: list[dict[str, Any]] = []
     for asset in assets:
@@ -89,7 +150,7 @@ def enrich_assets(assets: list[scraper.Asset], project_dir: Path) -> list[dict[s
             asset.source_path,
             asset.categories[0] if asset.categories else None,
         )
-        domains = [classified.primary_domain, *classified.secondary_domains]
+        domains = [classified.primary_domain]
         tech = taxonomy.classify_tech_tags(text, asset.source_path)
         setattr(asset, "_domains", domains)
         setattr(asset, "_primary_domain", classified.primary_domain)
@@ -204,6 +265,69 @@ def run_curated_preview(
     }
 
 
+def _install_to_platform(
+    assets: list[scraper.Asset],
+    *,
+    client: scraper.GitHubClient,
+    install_user: bool,
+    install_project: bool,
+    project_dir: Path,
+    force: bool,
+    platform_id: str,
+    report: scraper.ScrapeReport,
+) -> dict[str, list[str]]:
+    from studio.platform_compat import detect_platforms
+    from studio.safety import require_safe_for_install
+
+    spec = get_platform(platform_id)
+    if spec.status == "planned":
+        raise ValueError(f"{spec.label} is not installable yet.")
+
+    bases = platform_paths.get_install_bases(
+        platform_id=platform_id,
+        install_user=install_user,
+        install_project=install_project,
+        project_dir=project_dir,
+    )
+    installed: dict[str, list[str]] = {"user": [], "project": []}
+
+    for asset in assets:
+        compatible = detect_platforms(asset.source_path, asset.asset_type)
+        if platform_id not in compatible:
+            report.errors.append(
+                f"skip {asset.install_name} on {spec.label}: not compatible with this asset path"
+            )
+            continue
+        if asset.asset_type not in spec.supported_assets and not (
+            asset.asset_type == "agents_md" and "agents_md" in spec.supported_assets
+        ):
+            report.errors.append(
+                f"skip {asset.install_name}: {asset.asset_type} not supported on {spec.label}"
+            )
+            continue
+        text = getattr(asset, "_content", None)
+        if text is None:
+            try:
+                text = client.request_text(asset.raw_url)
+            except Exception as e:
+                report.errors.append(f"install fetch {asset.raw_url}: {e}")
+                continue
+        try:
+            require_safe_for_install(text, asset.source_path, asset.install_name)
+        except ValueError as e:
+            report.errors.append(str(e))
+            continue
+        for scope, base in bases:
+            try:
+                dest = write_asset_for_platform(asset, text, base, force, platform_id)
+                if dest:
+                    installed[scope].append(str(dest))
+            except Exception as e:
+                report.errors.append(f"install {scope} {asset.install_name} ({spec.id}): {e}")
+
+    return installed
+
+
 def install_assets(
     assets_data: list[dict[str, Any]],
     *,
@@ -212,21 +336,55 @@ def install_assets(
     project_dir: Path,
     force: bool,
     token: str | None,
+    platform_id: str = DEFAULT_PLATFORM_ID,
+    platforms: list[str] | None = None,
 ) -> dict[str, Any]:
+    target_platforms = platforms if platforms else [platform_id]
+    seen: list[str] = []
+    for pid in target_platforms:
+        spec = get_platform(pid)
+        if spec.id not in seen and spec.status in ("stable", "beta"):
+            seen.append(spec.id)
+
+    if not seen:
+        raise ValueError("No installable platforms selected")
+
     client = scraper.GitHubClient(token, use_api_metadata=bool(token))
     report = scraper.ScrapeReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
         project_dir=str(project_dir),
-        user_cursor_dir=str(scraper.user_cursor_dir()),
+        user_cursor_dir=str(platform_paths.user_root(seen[0])),
         categories_filter=[],
     )
     assets = [dict_to_asset(d) for d in assets_data]
-    installed = scraper.install_assets(
-        assets,
-        client,
-        install_user=install_user,
-        install_project=project_dir if install_project else None,
-        force=force,
-        report=report,
-    )
-    return {"installed": installed, "errors": report.errors}
+    merged: dict[str, list[str]] = {"user": [], "project": []}
+    per_platform: dict[str, dict[str, list[str]]] = {}
+
+    for pid in seen:
+        try:
+            inst = _install_to_platform(
+                assets,
+                client=client,
+                install_user=install_user,
+                install_project=install_project,
+                project_dir=project_dir,
+                force=force,
+                platform_id=pid,
+                report=report,
+            )
+            per_platform[pid] = inst
+            merged["user"].extend(inst["user"])
+            merged["project"].extend(inst["project"])
+        except ValueError as e:
+            report.errors.append(str(e))
+
+    from studio.install_cache import invalidate_install_index
+
+    invalidate_install_index()
+    return {
+        "installed": merged,
+        "installed_by_platform": per_platform,
+        "errors": report.errors,
+        "platform": seen[0],
+        "platforms": seen,
+    }

@@ -6,10 +6,14 @@ import {
   getCategories,
   getConnection,
   getExport,
-  getCatalog,
+  fetchAllCatalog,
   getLeaderboards,
+  getPlatforms,
+  getBootstrap,
+  postAutoDetectPlatform,
   getSettings,
   patchSettings,
+  type PlatformInfo,
   postImport,
   postInstall,
   postSync,
@@ -43,6 +47,12 @@ export function useStudio() {
   const [discoveryProfessions, setDiscoveryProfessions] = useState<
     import("../api").DiscoveryProfession[]
   >([]);
+  const [discoveryPanelProfessions, setDiscoveryPanelProfessions] = useState<
+    import("../api").DiscoveryProfession[]
+  >([]);
+  const [discoveryUi, setDiscoveryUi] = useState<import("../api").DiscoveryUiConfig | null>(
+    null
+  );
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [curatedHelp, setCuratedHelp] = useState("");
   const [domainLabels, setDomainLabels] = useState<Record<string, string>>({});
@@ -52,8 +62,16 @@ export function useStudio() {
   >([]);
   const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(DEFAULT_CATS));
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [catalogTotal, setCatalogTotal] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [projectDir, setProjectDir] = useState("");
+  const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
+  const [platform, setPlatformState] = useState("cursor");
+  const [platformMode, setPlatformMode] = useState<"auto" | "manual">("auto");
+  const [extraInstallPlatforms, setExtraInstallPlatforms] = useState<Set<string>>(
+    new Set()
+  );
+  const platformRef = useRef("cursor");
   const [installUser, setInstallUser] = useState(true);
   const [installProject, setInstallProject] = useState(false);
   const [force, setForce] = useState(false);
@@ -64,6 +82,7 @@ export function useStudio() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [hideInstalled, setHideInstalled] = useState(false);
+  const [hideIncompatible, setHideIncompatible] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<"setup" | "installed">("setup");
   const [logOpen, setLogOpen] = useState(true);
   const [leaderboards, setLeaderboards] = useState<LeaderboardsResponse | null>(null);
@@ -86,72 +105,76 @@ export function useStudio() {
     setLogOpen(true);
   }, []);
 
+  const applyBootstrap = useCallback((data: Awaited<ReturnType<typeof getBootstrap>>) => {
+    const s = data.settings;
+    const active = s.active_platform ?? s.default_platform ?? "cursor";
+    platformRef.current = active;
+    setPlatformState(active);
+    setPlatformMode(s.platform_mode ?? "auto");
+    setExtraInstallPlatforms(new Set(s.extra_install_platforms ?? []));
+    setProjectDir(s.project_dir);
+    setDbStats({
+      asset_count: s.asset_count,
+      synced_content_count: s.synced_content_count,
+      last_synced_at: s.last_synced_at,
+      stars_last_refreshed_at: s.stars_last_refreshed_at,
+      stars_live: s.stars_live,
+    });
+    setConnection(data.connection);
+    const cats = data.categories;
+    setAllCategories(cats.categories);
+    setCategoryGroups(cats.groups);
+    setDiscoveryProfessions(cats.discovery_professions ?? []);
+    setDiscoveryPanelProfessions(
+      data.discovery?.profession_domains ?? cats.discovery_professions ?? []
+    );
+    setDiscoveryUi(data.discovery?.config ?? null);
+    setDomainLabels(cats.domain_labels ?? {});
+    setTechStackLabels(cats.tech_stack_labels ?? {});
+    setRepoOwners(cats.repo_owners ?? []);
+    setCuratedHelp(cats.curated_help);
+    setLeaderboards(data.leaderboards);
+    setPlatforms(data.platforms.platforms);
+    setAssets(data.catalog.assets);
+    setBackendReady(true);
+  }, []);
+
   const refresh = useCallback(
     async (opts?: { silent?: boolean }) => {
       try {
-        const [settings, conn, cats, boards] = await Promise.all([
-          getSettings(),
-          getConnection(),
-          getCategories(),
-          getLeaderboards(),
-        ]);
-        setProjectDir(settings.project_dir);
-        setDbStats({
-          asset_count: settings.asset_count,
-          synced_content_count: settings.synced_content_count,
-          last_synced_at: settings.last_synced_at,
-          stars_last_refreshed_at: settings.stars_last_refreshed_at,
-          stars_live: settings.stars_live,
-        });
-        setConnection(conn);
-        setAllCategories(cats.categories);
-        setCategoryGroups(cats.groups);
-      setDiscoveryProfessions(cats.discovery_professions ?? []);
-        setDomainLabels(cats.domain_labels ?? {});
-        setTechStackLabels(cats.tech_stack_labels ?? {});
-        setRepoOwners(cats.repo_owners ?? []);
-        setCuratedHelp(cats.curated_help);
-        setLeaderboards(boards);
-        setBackendReady(true);
+        const data = await getBootstrap(platformRef.current);
+        applyBootstrap(data);
       } catch (e) {
         setBackendReady(false);
         if (!opts?.silent) pushLog(String(e), "err");
       }
     },
-    [pushLog]
+    [pushLog, applyBootstrap]
   );
-
-  const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
 
   useEffect(() => {
     let cancelled = false;
-    const delays = [0, 800, 1600, 3000, 5000];
+    const delays = [0, 400, 1000, 2000];
 
     (async () => {
       for (let i = 0; i < delays.length; i++) {
         if (cancelled) return;
         if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
         if (cancelled) return;
-        const healthy = await fetch("/api/health")
-          .then((r) => r.ok)
-          .catch(() => false);
-        if (!healthy) continue;
-        await refreshRef.current({ silent: i < delays.length - 1 });
-        if (!cancelled && i > 0) pushLog("Connected to API", "ok");
-        if (!cancelled) {
-          try {
-            const cat = await getCatalog({ limit: 5000 });
-            setAssets(cat.assets);
-          } catch {
-            /* catalog loads on next refresh */
-          }
+        try {
+          const data = await getBootstrap();
+          if (cancelled) return;
+          applyBootstrap(data);
+          if (i > 0) pushLog("Connected to API", "ok");
+          await loadCatalog({ silent: true });
+          return;
+        } catch {
+          /* API not ready yet */
         }
-        return;
       }
       if (!cancelled) {
         pushLog(
-          "Backend unavailable. Run npm run dev in the skill-harbor folder, then click Refresh.",
+          "Backend unavailable. Run npm run dev in the project folder, then retry.",
           "err"
         );
       }
@@ -160,7 +183,6 @@ export function useStudio() {
     return () => {
       cancelled = true;
     };
-    // Mount-only: retry until API is up (Vite often starts before uvicorn)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -176,31 +198,97 @@ export function useStudio() {
   const selectAllCats = () => setSelectedCats(new Set(allCategories));
   const clearCats = () => setSelectedCats(new Set());
 
-  const loadCatalog = useCallback(async () => {
+  const loadCatalog = useCallback(async (opts?: { silent?: boolean }) => {
     try {
-      const result = await getCatalog({ limit: 5000 });
+      const result = await fetchAllCatalog({ include_stats: true });
       setAssets(result.assets);
-      setDbStats({
-        asset_count: result.stats.total_assets,
-        synced_content_count: result.stats.synced_content,
-        last_synced_at: dbStats?.last_synced_at,
-      });
+      setCatalogTotal(result.total);
+      if (result.stats) {
+        setDbStats((prev) => ({
+          asset_count: result.stats!.total_assets,
+          synced_content_count: result.stats!.synced_content,
+          last_synced_at: prev?.last_synced_at,
+        }));
+      }
+      if (!opts?.silent) {
+        pushLog(`Loaded ${result.assets.length.toLocaleString()} catalog assets`, "ok");
+      }
       return result;
     } catch (e) {
       pushLog(String(e), "err");
       return null;
     }
-  }, [pushLog, dbStats?.last_synced_at]);
+  }, [pushLog]);
+
+  const setPlatform = useCallback(
+    async (next: string, opts?: { manual?: boolean }) => {
+      platformRef.current = next;
+      setPlatformState(next);
+      if (opts?.manual) {
+        setPlatformMode("manual");
+        await patchSettings({ default_platform: next, platform_mode: "manual" });
+      }
+      try {
+        const conn = await getConnection(next);
+        setConnection(conn);
+        const result = await fetchAllCatalog({ include_stats: true });
+        setAssets(result.assets);
+        setCatalogTotal(result.total);
+      } catch (e) {
+        pushLog(String(e), "err");
+      }
+    },
+    [pushLog]
+  );
+
+  const autoDetectPlatform = useCallback(async () => {
+    setBusy(true);
+    try {
+      const detection = await postAutoDetectPlatform();
+      const next = detection.recommended_platform ?? "cursor";
+      platformRef.current = next;
+      setPlatformState(next);
+      setPlatformMode("auto");
+      pushLog(
+        detection.count
+          ? `Auto-detected ${detection.detected[0]?.label ?? next} (${detection.count} agent folder(s) found)`
+          : `No agent folders found — defaulting to ${next}`,
+        "ok"
+      );
+      const conn = await getConnection(next);
+      setConnection(conn);
+      await loadCatalog();
+    } catch (e) {
+      pushLog(String(e), "err");
+    } finally {
+      setBusy(false);
+    }
+  }, [pushLog, loadCatalog]);
+
+  const hideCompatBootstrapped = useRef(false);
+  useEffect(() => {
+    if (!backendReady) return;
+    if (!hideCompatBootstrapped.current) {
+      hideCompatBootstrapped.current = true;
+      return;
+    }
+    void loadCatalog();
+  }, [hideIncompatible, backendReady, loadCatalog]);
 
   const syncRegistry = async (force = false) => {
     setBusy(true);
-    pushLog("Syncing file content from GitHub (no token)…");
+    pushLog("Syncing missing content from GitHub (parallel)…");
     try {
       const result = await postSync(force);
-      pushLog(`Synced ${result.updated} assets`, "ok");
+      const skipped = (result as { skipped?: boolean }).skipped;
+      pushLog(
+        skipped
+          ? "Registry already has content — nothing to sync"
+          : `Synced ${result.updated} asset(s)`,
+        "ok"
+      );
       result.errors.slice(0, 5).forEach((e) => pushLog(e, "err"));
       await loadCatalog();
-      await refresh({ silent: true });
     } catch (e) {
       pushLog(String(e), "err");
     } finally {
@@ -208,7 +296,7 @@ export function useStudio() {
     }
   };
 
-  const fetchCatalog = syncRegistry;
+  const fetchCatalog = loadCatalog;
 
   const runInstall = async () => {
     const picked = assets.filter((a) => selectedIds.has(a.id));
@@ -219,14 +307,31 @@ export function useStudio() {
     setBusy(true);
     pushLog(`Installing ${picked.length} item(s)…`);
     try {
+      const unsafe = picked.filter((a) => a.safety && !a.safety.safe);
+      if (unsafe.length) {
+        pushLog(
+          `${unsafe.length} item(s) blocked by safety check — open inspector for details`,
+          "err"
+        );
+        return;
+      }
+      const primary = platformRef.current;
+      const also = [...extraInstallPlatforms].filter((p) => p !== primary);
+      const targetPlatforms = also.length ? [primary, ...also] : [primary];
       const result = await postInstall({
         assets: picked,
         install_user: installUser,
         install_project: installProject,
         force,
+        platform: primary,
+        platforms: targetPlatforms,
       });
+      const platNote =
+        (result.platforms?.length ?? 0) > 1
+          ? ` → ${result.platforms!.join(", ")}`
+          : "";
       pushLog(
-        `Installed: ${result.installed.user?.length ?? 0} global, ${result.installed.project?.length ?? 0} project`,
+        `Installed: ${result.installed.user?.length ?? 0} global, ${result.installed.project?.length ?? 0} project${platNote}`,
         "ok"
       );
       result.errors.forEach((e) => pushLog(e, "err"));
@@ -244,6 +349,9 @@ export function useStudio() {
     try {
       await patchSettings({
         project_dir: projectDir || undefined,
+        default_platform: platformRef.current,
+        platform_mode: platformMode,
+        extra_install_platforms: [...extraInstallPlatforms],
       });
       pushLog("Settings saved", "ok");
       await refresh();
@@ -335,50 +443,94 @@ export function useStudio() {
     input.click();
   };
 
-  const filteredAssets = useMemo(() => {
-    let list = assets;
-    if (selectedCats.size) {
-      list = list.filter((a) =>
-        [...(a.domains ?? []), ...a.categories].some((c) => selectedCats.has(c))
-      );
-    }
-    if (typeFilter !== "all") {
-      list = list.filter((a) => a.asset_type === typeFilter);
-    }
-    if (hideInstalled) {
-      list = list.filter((a) => a.install_status?.status === "none");
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase().trim();
-      const ghMatch = q.match(/github\.com[/:]([^/]+)\/([^/?.#\s]+)/);
-      list = list.filter((a) => {
-        const owner = a.source_repo.split("/")[0]?.toLowerCase() ?? "";
-        const hay = [
-          a.curated_title,
-          a.install_name,
-          a.source_repo,
-          owner,
-          a.source_path,
-          a.content_preview,
-          a.raw_url,
-          a.id,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (hay.includes(q)) return true;
-        if (owner === q || owner.startsWith(q)) return true;
-        if (ghMatch) {
-          const repo = `${ghMatch[1]}/${ghMatch[2].replace(/\.git$/, "")}`;
-          return a.source_repo.toLowerCase().includes(repo);
-        }
-        return false;
-      });
-    }
-    return list;
-  }, [assets, selectedCats, typeFilter, hideInstalled, search]);
+  const applyCatalogFilters = useCallback(
+    (
+      list: Asset[],
+      opts?: {
+        categories?: boolean;
+        /** When false, Browse shows the full registry regardless of Discovery toggles. */
+        respectInstalled?: boolean;
+        respectIncompatible?: boolean;
+      }
+    ) => {
+      let out = list;
+      if (opts?.categories && selectedCats.size) {
+        out = out.filter((a) =>
+          [...(a.domains ?? []), ...a.categories].some((c) => selectedCats.has(c))
+        );
+      }
+      if (typeFilter !== "all") {
+        out = out.filter((a) => a.asset_type === typeFilter);
+      }
+      const respectInstalled = opts?.respectInstalled ?? true;
+      const respectIncompatible = opts?.respectIncompatible ?? true;
+      if (respectInstalled && hideInstalled) {
+        out = out.filter((a) => a.install_status?.status === "none");
+      }
+      if (respectIncompatible && hideIncompatible && platform) {
+        out = out.filter(
+          (a) => !a.platforms?.length || a.platforms.includes(platform)
+        );
+      }
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        const ghMatch = q.match(/github\.com[/:]([^/]+)\/([^/?.#\s]+)/);
+        out = out.filter((a) => {
+          const owner = a.source_repo.split("/")[0]?.toLowerCase() ?? "";
+          const hay = [
+            a.curated_title,
+            a.install_name,
+            a.source_repo,
+            owner,
+            a.source_path,
+            a.content_preview,
+            a.raw_url,
+            a.id,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          if (hay.includes(q)) return true;
+          if (owner === q || owner.startsWith(q)) return true;
+          if (ghMatch) {
+            const repo = `${ghMatch[1]}/${ghMatch[2].replace(/\.git$/, "")}`;
+            return a.source_repo.toLowerCase().includes(repo);
+          }
+          return false;
+        });
+      }
+      return out;
+    },
+    [selectedCats, typeFilter, hideInstalled, hideIncompatible, platform, search]
+  );
+
+  /** Discovery / search — respects category chips. */
+  const filteredAssets = useMemo(
+    () => applyCatalogFilters(assets, { categories: true }),
+    [assets, applyCatalogFilters]
+  );
+
+  /** Browse tab — full registry; Discovery hide-installed / hide-incompatible toggles do not apply. */
+  const browseAssets = useMemo(
+    () =>
+      applyCatalogFilters(assets, {
+        categories: false,
+        respectInstalled: false,
+        respectIncompatible: false,
+      }),
+    [assets, applyCatalogFilters]
+  );
 
   const visibleIds = useMemo(() => filteredAssets.map((a) => a.id), [filteredAssets]);
+
+  const compatiblePlatformsForSelection = useMemo(() => {
+    const picked = assets.filter((a) => selectedIds.has(a.id));
+    if (!picked.length) return platforms.filter((p) => p.installable).map((p) => p.id);
+    const lists = picked.map((a) =>
+      a.platforms?.length ? a.platforms : platforms.filter((p) => p.installable).map((p) => p.id)
+    );
+    return lists.reduce((acc, cur) => acc.filter((id) => cur.includes(id)), lists[0] ?? []);
+  }, [assets, selectedIds, platforms]);
 
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
@@ -446,12 +598,15 @@ export function useStudio() {
   const activeFilterCount =
     (typeFilter !== "all" ? 1 : 0) +
     (hideInstalled ? 1 : 0) +
+    (hideIncompatible ? 1 : 0) +
     (search.trim() ? 1 : 0);
 
   return {
     connection,
     categoryGroups,
     discoveryProfessions,
+    discoveryPanelProfessions,
+    discoveryUi,
     domainLabels,
     techStackLabels,
     repoOwners,
@@ -461,6 +616,14 @@ export function useStudio() {
     selectedIds,
     projectDir,
     setProjectDir,
+    platforms,
+    platform,
+    platformMode,
+    setPlatform,
+    autoDetectPlatform,
+    extraInstallPlatforms,
+    setExtraInstallPlatforms,
+    compatiblePlatformsForSelection,
     installUser,
     setInstallUser,
     installProject,
@@ -479,6 +642,8 @@ export function useStudio() {
     setTypeFilter,
     hideInstalled,
     setHideInstalled,
+    hideIncompatible,
+    setHideIncompatible,
     sidebarTab,
     setSidebarTab,
     logOpen,
@@ -491,6 +656,8 @@ export function useStudio() {
     setLeaderboardTab,
     focusLeaderboardEntry,
     filteredAssets,
+    browseAssets,
+    catalogTotal,
     installedItems,
     hasCatalog,
     activeFilterCount,

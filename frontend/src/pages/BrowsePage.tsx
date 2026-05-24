@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Studio } from "../hooks/useStudio";
 import { AssetRankCard } from "../components/dashboard/AssetRankCard";
 import { MultiSelectDropdown } from "../components/browse/MultiSelectDropdown";
@@ -13,11 +13,15 @@ const TYPE_OPTIONS = [
 
 type SortKey = "stars" | "votes" | "name";
 
+const PAGE_SIZE = 60;
+
 type Props = { studio: Studio };
 
 export function BrowsePage({ studio }: Props) {
   const {
-    filteredAssets,
+    browseAssets,
+    catalogTotal,
+    dbStats,
     search,
     setSearch,
     selectedAssetId,
@@ -36,6 +40,7 @@ export function BrowsePage({ studio }: Props) {
   const [domainFilters, setDomainFilters] = useState<Set<string>>(() => new Set());
   const [stackFilters, setStackFilters] = useState<Set<string>>(() => new Set());
   const [sortBy, setSortBy] = useState<SortKey>("stars");
+  const [page, setPage] = useState(1);
 
   const domainOptions = useMemo(() => {
     const slugs = new Set<string>();
@@ -71,8 +76,10 @@ export function BrowsePage({ studio }: Props) {
     return listRepoOwners(assets).map((a) => ({ value: a, label: a }));
   }, [repoOwners, assets]);
 
+  const registryTotal = dbStats?.asset_count ?? catalogTotal;
+
   const shown = useMemo(() => {
-    let list = filteredAssets;
+    let list = browseAssets;
     if (authorFilters.size) {
       list = list.filter((a) => authorFilters.has(repoOwner(a.source_repo)));
     }
@@ -106,9 +113,30 @@ export function BrowsePage({ studio }: Props) {
       sorted.sort((a, b) => a.install_name.localeCompare(b.install_name));
     }
     return sorted;
-  }, [filteredAssets, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
+  }, [browseAssets, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
 
-  const shownIds = useMemo(() => shown.map((a) => a.id), [shown]);
+  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    document.querySelector(".browse-page")?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [page]);
+
+  const pageStart = shown.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(page * PAGE_SIZE, shown.length);
+  const pageItems = useMemo(
+    () => shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [shown, page]
+  );
+
+  const shownIds = useMemo(() => pageItems.map((a) => a.id), [pageItems]);
   const allShownSelected =
     shownIds.length > 0 && shownIds.every((id) => selectedIds.has(id));
   const someSelected = shownIds.some((id) => selectedIds.has(id));
@@ -185,9 +213,9 @@ export function BrowsePage({ studio }: Props) {
               type="button"
               className="harbor-btn harbor-btn--ghost harbor-btn--sm"
               onClick={() => toggleSelectAllForIds(shownIds)}
-              disabled={shown.length === 0}
+              disabled={pageItems.length === 0}
             >
-              {allShownSelected ? "Deselect visible" : "Select all visible"}
+              {allShownSelected ? "Deselect page" : "Select page"}
             </button>
             <button
               type="button"
@@ -202,12 +230,16 @@ export function BrowsePage({ studio }: Props) {
             ) : null}
           </div>
           <span className="browse-toolbar__count">
-            {shown.length} asset{shown.length === 1 ? "" : "s"}
+            {shown.length === 0
+              ? `0 matches · ${registryTotal.toLocaleString()} in registry`
+              : shown.length === registryTotal
+                ? `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${shown.length.toLocaleString()}`
+                : `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${shown.length.toLocaleString()} matches · ${registryTotal.toLocaleString()} in registry`}
           </span>
         </div>
       </header>
       <div className="harbor-card-grid harbor-card-grid--scroll">
-        {shown.map((asset) => (
+        {pageItems.map((asset) => (
           <AssetRankCard
             key={asset.id}
             asset={asset}
@@ -218,6 +250,45 @@ export function BrowsePage({ studio }: Props) {
           />
         ))}
       </div>
+      {shown.length > PAGE_SIZE ? (
+        <nav className="browse-pagination" aria-label="Browse pages">
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage(1)}
+            disabled={page <= 1}
+          >
+            First
+          </button>
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+          >
+            Previous
+          </button>
+          <span className="browse-pagination__status">
+            Page {page.toLocaleString()} of {totalPages.toLocaleString()}
+          </span>
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Next
+          </button>
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage(totalPages)}
+            disabled={page >= totalPages}
+          >
+            Last
+          </button>
+        </nav>
+      ) : null}
       {shown.length === 0 ? (
         <p className="harbor-empty">No assets match. Try Sync registry or adjust filters.</p>
       ) : null}

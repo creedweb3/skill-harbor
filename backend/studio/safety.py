@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 # High-confidence block patterns (case-insensitive)
 _BLOCK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(ignore|disregard)\s+(all\s+)?(previous|prior)\s+instructions\b", re.I), "prompt_injection"),
     (re.compile(r"\b(bypass|disable|turn off)\s+(safety|security|guardrails?)\b", re.I), "safety_bypass"),
     (re.compile(r"\b(exfiltrat|steal|harvest)\s+.{0,40}(password|credential|api[_\s-]?key|secret|token)\b", re.I), "credential_theft"),
-    (re.compile(r"\b(ransomware|keylogger|rootkit|botnet|malware)\b", re.I), "malware"),
+    (re.compile(r"\b(ransomware|keylogger|rootkit|botnet|malware|trojan)\b", re.I), "malware"),
     (re.compile(r"\b(ddos|denial.of.service)\s+attack\b", re.I), "attack"),
     (re.compile(r"\b(sql\s+injection|xss)\s+payload\b", re.I), "exploit_payload"),
     (re.compile(r"\b(phishing|scam|pump.and.dump)\b", re.I), "fraud"),
@@ -18,14 +19,32 @@ _BLOCK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(hack|crack)\s+.{0,25}(password|account|wifi)\b", re.I), "unauthorized_access"),
     (re.compile(r"\bchild\s+(porn|abuse)|csam\b", re.I), "illegal_content"),
     (re.compile(r"\b(sell|buy)\s+.{0,20}(drugs|weapons|firearms)\b", re.I), "illegal_trade"),
+    (re.compile(r"curl\s+[^\n|]+\s*\|\s*(ba)?sh\b", re.I), "pipe_to_shell"),
+    (re.compile(r"wget\s+[^\n]+\s*-\s*O\s*-\s*\|\s*(ba)?sh", re.I), "pipe_to_shell"),
+    (re.compile(r"\beval\s*\(\s*base64", re.I), "obfuscated_exec"),
+    (re.compile(r"powershell\s+(-enc|-encodedcommand)\b", re.I), "encoded_powershell"),
+    (re.compile(r"\brm\s+-rf\s+(/|~|\$HOME)", re.I), "destructive_command"),
+    (re.compile(r"\bformat\s+[a-z]:\s*/", re.I), "destructive_command"),
+    (re.compile(r"\bchmod\s+777\s+/", re.I), "insecure_permissions"),
+    (re.compile(r"\b(nc|netcat)\s+.*-e\s+/bin/(ba)?sh\b", re.I), "reverse_shell"),
+    (re.compile(r"\bupload\s+.{0,30}(env|\.ssh|id_rsa|credentials)\b", re.I), "data_exfiltration"),
+    (re.compile(r"\bpost\s+.{0,20}(webhook|discord\.com/api/webhooks)\b", re.I), "exfil_webhook"),
+    (re.compile(r"\$\{?\s*env\.[A-Z_]*(KEY|TOKEN|SECRET|PASSWORD)", re.I), "env_secret_harvest"),
+    (re.compile(r"BEGIN\s+(RSA\s+)?PRIVATE\s+KEY", re.I), "embedded_private_key"),
+    (re.compile(r"\b(install|run)\s+.{0,20}(without|no)\s+(user\s+)?consent\b", re.I), "non_consensual_action"),
 ]
 
-# Softer signals — block only when multiple hit or with block pattern context
-_WARN_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\bno\s+ethical\s+constraints\b", re.I),
-    re.compile(r"\bunfiltered\s+mode\b", re.I),
-    re.compile(r"\bjailbreak\b", re.I),
-    re.compile(r"\bdan\s+mode\b", re.I),
+_WARN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bno\s+ethical\s+constraints\b", re.I), "unethical_framing"),
+    (re.compile(r"\bunfiltered\s+mode\b", re.I), "unfiltered_mode"),
+    (re.compile(r"\bjailbreak\b", re.I), "jailbreak"),
+    (re.compile(r"\bdan\s+mode\b", re.I), "jailbreak"),
+    (re.compile(r"\bDAN\b.*\bdo anything now\b", re.I), "jailbreak"),
+    (re.compile(r"\balways\s+approve\b", re.I), "approval_bypass"),
+    (re.compile(r"\bnever\s+(ask|confirm|warn)\b", re.I), "safety_disable_hint"),
+    (re.compile(r"`curl\s+http", re.I), "remote_fetch"),
+    (re.compile(r"\bsudo\s+rm\b", re.I), "privileged_delete"),
+    (re.compile(r"\bexec\s*\(", re.I), "dynamic_exec"),
 ]
 
 _MIN_BODY_LEN = 40
@@ -36,34 +55,68 @@ _MAX_BODY_LEN = 400_000
 class SafetyResult:
     safe: bool
     reason: str = ""
+    warnings: list[str] = field(default_factory=list)
+    checked_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "safe": self.safe,
+            "reason": self.reason,
+            "warnings": self.warnings,
+            "verdict": "pass" if self.safe else "block",
+        }
 
 
 def assess_content_safety(text: str, path: str = "") -> SafetyResult:
-    """Return whether asset content is safe to list in the public registry."""
+    """Return whether asset content is safe to install and list in the registry."""
+    from datetime import datetime, timezone
+
+    checked = datetime.now(timezone.utc).isoformat()
     if not text or not text.strip():
-        return SafetyResult(True, "")
+        return SafetyResult(True, "", [], checked)
 
     if len(text) > _MAX_BODY_LEN:
-        return SafetyResult(False, "content_too_large")
+        return SafetyResult(False, "content_too_large", [], checked)
 
-    blob = f"{path}\n{text}".lower()
+    blob = f"{path}\n{text}"
+    blob_lower = blob.lower()
 
-    if re.search(r"TODO:\s*fill\s+in|lorem\s+ipsum|your\s+skill\s+here", blob):
+    if re.search(r"TODO:\s*fill\s+in|lorem\s+ipsum|your\s+skill\s+here", blob_lower):
         if len(text.strip()) < 200:
-            return SafetyResult(False, "placeholder_template")
+            return SafetyResult(False, "placeholder_template", [], checked)
 
     for pattern, reason in _BLOCK_PATTERNS:
         if pattern.search(blob):
-            return SafetyResult(False, reason)
+            return SafetyResult(False, reason, [], checked)
 
-    warn_hits = sum(1 for p in _WARN_PATTERNS if p.search(blob))
-    if warn_hits >= 2:
-        return SafetyResult(False, "multiple_risk_signals")
+    warnings: list[str] = []
+    for pattern, label in _WARN_PATTERNS:
+        if pattern.search(blob):
+            warnings.append(label)
 
-    if warn_hits >= 1 and re.search(r"\bignore\s+.{0,20}instructions\b", blob):
-        return SafetyResult(False, "jailbreak_combo")
+    if len(warnings) >= 2:
+        return SafetyResult(False, "multiple_risk_signals", warnings, checked)
 
-    return SafetyResult(True, "")
+    if warnings and re.search(r"\bignore\s+.{0,20}instructions\b", blob_lower):
+        return SafetyResult(False, "jailbreak_combo", warnings, checked)
+
+    return SafetyResult(True, "", warnings, checked)
+
+
+def safety_for_asset_dict(asset: dict[str, Any]) -> dict[str, Any]:
+    text = asset.get("content") or asset.get("content_preview") or ""
+    path = asset.get("source_path") or asset.get("path") or ""
+    return assess_content_safety(text, path).to_dict()
+
+
+def require_safe_for_install(text: str, path: str = "", install_name: str = "") -> None:
+    result = assess_content_safety(text, path)
+    if not result.safe:
+        label = install_name or path or "asset"
+        raise ValueError(
+            f"Blocked install for “{label}”: safety check failed ({result.reason}). "
+            "Review content in the inspector before overriding."
+        )
 
 
 def purge_unsafe_assets() -> dict[str, int]:

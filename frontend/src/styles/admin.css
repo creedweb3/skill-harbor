@@ -665,10 +665,87 @@ html:has(.admin-shell) body {
   appearance: textfield;
 }
 
-.admin-input[type="number"]::-webkit-inner-spin-button,
+.admin-input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .admin-input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* Discovery panel JSON editor */
+.admin-panel--discovery .admin-panel-head {
+  margin-bottom: 1rem;
+}
+
+.admin-discovery-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-discovery-editor__label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--harbor-text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.admin-discovery-editor__format {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--harbor-muted);
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--harbor-radius-full);
+  border: 1px solid var(--harbor-border);
+  background: var(--harbor-bg);
+  font-family: var(--harbor-mono, ui-monospace, monospace);
+}
+
+.admin-discovery-editor__textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 18rem;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  resize: vertical;
+  overflow: auto;
+  background: var(--harbor-bg);
+  border: 1px solid var(--harbor-border-strong);
+  border-radius: var(--harbor-radius);
+  color: var(--harbor-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-discovery-editor__textarea:focus {
+  outline: none;
+  border-color: rgba(217, 119, 87, 0.45);
+  box-shadow: 0 0 0 3px var(--harbor-accent-dim);
+}
+
+.admin-discovery-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--harbor-border);
+}
+
+.admin-discovery-actions .btn {
+  min-width: 10rem;
 }
 
 .admin-activity-detail,

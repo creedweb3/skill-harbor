@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from studio import scraper_bridge, taxonomy
+from studio import platform_paths
 from studio.catalog import CatalogService
+from studio.install_cache import get_install_index
 
 
-def sync_catalog(*, force: bool = False) -> dict[str, Any]:
+def sync_catalog(*, force: bool = False, max_workers: int = 12) -> dict[str, Any]:
     import scrape_cursor_github as scraper
 
     catalog = CatalogService()
@@ -18,18 +21,22 @@ def sync_catalog(*, force: bool = False) -> dict[str, Any]:
     errors: list[str] = []
     updated = 0
 
-    for row in catalog.all_asset_rows():
+    rows = [r for r in catalog.all_asset_rows() if force or not r.get("content")]
+    if not rows:
+        catalog.finish_sync_run(run_id, updated=0, errors=[], status="ok")
+        return {"updated": 0, "errors": [], "status": "ok", "run_id": run_id, "skipped": True}
+
+    def _sync_one(row: dict[str, Any]) -> tuple[str, bool, str | None]:
         aid = row["id"]
-        if row.get("content") and not force:
-            continue
-        owner = row["owner"]
-        repo = row["repo"]
-        path = row["path"]
-        branch_hint = row.get("branch") or None
         try:
-            text, branch = client.fetch_raw_file(owner, repo, path, branch_hint)
+            text, branch = client.fetch_raw_file(
+                row["owner"],
+                row["repo"],
+                row["path"],
+                row.get("branch") or None,
+            )
             stars = int(row.get("stars") or 0)
-            raw_url = scraper.raw_url(owner, repo, branch, path)
+            raw_url = scraper.raw_url(row["owner"], row["repo"], branch, row["path"])
             catalog.update_content(
                 aid,
                 content=text,
@@ -38,80 +45,77 @@ def sync_catalog(*, force: bool = False) -> dict[str, Any]:
                 stars=stars,
                 repo_pushed_at=row.get("repo_pushed_at") or "",
             )
-            classified = taxonomy.classify_asset(text, path, row.get("category"))
-            tech = taxonomy.classify_tech_tags(text, path)
-            catalog.upsert_asset(
-                {**row, "stars": stars},
-                primary_domain=classified.primary_domain,
-                secondary_domains=classified.secondary_domains,
-                tech_tags=tech,
-            )
-            updated += 1
+            return aid, True, None
         except Exception as e:
-            errors.append(f"{aid}: {e}")
+            return aid, False, str(e)
+
+    workers = min(max_workers, max(1, len(rows)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_sync_one, row) for row in rows]
+        for fut in as_completed(futures):
+            aid, ok, err = fut.result()
+            if ok:
+                updated += 1
+            elif err:
+                errors.append(f"{aid}: {err}")
 
     status = "ok" if not errors else "partial"
     catalog.finish_sync_run(run_id, updated=updated, errors=errors, status=status)
-    return {"updated": updated, "errors": errors, "status": status, "run_id": run_id}
+    return {
+        "updated": updated,
+        "errors": errors,
+        "status": status,
+        "run_id": run_id,
+        "pending": len(rows),
+    }
+
+
+def enrich_install_status(
+    assets: list[dict[str, Any]],
+    project_dir: Path,
+    platform_id: str,
+) -> list[dict[str, Any]]:
+    """Fast path: add install_status only (no re-classify, no full content)."""
+    from studio import config
+    from studio.installed import match_asset_install
+
+    plat = platform_id or config.get_default_platform()
+    user = platform_paths.user_root(plat)
+    proj = platform_paths.project_root(project_dir, plat)
+    index = get_install_index(user, proj)
+
+    out: list[dict[str, Any]] = []
+    for d in assets:
+        row = dict(d)
+        preview = row.get("content_preview") or ""
+        sha = row.get("content_sha256") or ""
+        if not sha and preview:
+            sha = hashlib.sha256(preview.encode("utf-8")).hexdigest()[:16]
+        inst = match_asset_install(
+            content_sha256=sha,
+            install_name=row.get("install_name", ""),
+            asset_type=row.get("asset_type", "skill"),
+            index=index,
+        )
+        row["install_status"] = inst
+        out.append(row)
+    return out
 
 
 def enrich_catalog_assets(
-    assets: list[dict[str, Any]], project_dir: Path
+    assets: list[dict[str, Any]],
+    project_dir: Path,
+    platform_id: str | None = None,
+    *,
+    full: bool = False,
 ) -> list[dict[str, Any]]:
-    import scrape_cursor_github as scraper
+    from studio import config
 
-    scraper_assets: list[scraper.Asset] = []
-    for d in assets:
-        asset = scraper.Asset(
-            source_repo=d.get("source_repo", ""),
-            source_path=d.get("source_path", ""),
-            asset_type=d.get("asset_type", "skill"),
-            categories=d.get("categories") or d.get("domains") or [],
-            score=float(d.get("score") or 0),
-            stars=int(d.get("stars") or 0),
-            content_sha256=d.get("content_sha256", ""),
-            content_preview=d.get("content_preview", ""),
-            install_name=d.get("install_name", ""),
-            raw_url=d.get("raw_url", ""),
-            curated=bool(d.get("curated", True)),
-            curated_rank=int(d.get("curated_rank") or 99),
-            curated_title=d.get("curated_title") or d.get("title", ""),
-            repo_pushed_at=d.get("repo_pushed_at", ""),
-        )
-        content = d.get("content", "")
-        if content:
-            setattr(asset, "_content", content)
-            if not asset.content_sha256:
-                import hashlib
+    plat = platform_id or config.get_default_platform()
+    if not full:
+        return enrich_install_status(assets, project_dir, plat)
 
-                asset.content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        scraper_assets.append(asset)
-    enriched = scraper_bridge.enrich_assets(scraper_assets, project_dir)
-    by_id = {a["id"]: a for a in assets if a.get("id")}
-    preserve = (
-        "primary_domain",
-        "secondary_domains",
-        "tech_tags",
-        "branch",
-        "github_blob_url",
-        "github_repo_url",
-        "raw_url",
-        "content",
-        "upvotes",
-        "downvotes",
-        "vote_score",
-        "user_vote",
-    )
-    for row in enriched:
-        orig = by_id.get(row.get("id", ""), {})
-        for key in preserve:
-            if key in orig and orig[key] not in (None, "", []):
-                row[key] = orig[key]
-        if orig.get("primary_domain"):
-            primary = orig["primary_domain"]
-            secondary = orig.get("secondary_domains") or []
-            row["primary_domain"] = primary
-            row["secondary_domains"] = secondary
-            row["domains"] = [primary, *[s for s in secondary if s != primary]]
-            row["categories"] = row["domains"]
-    return enriched
+    from studio import scraper_bridge
+
+    scraper_assets = [scraper_bridge.dict_to_asset(d) for d in assets]
+    return scraper_bridge.enrich_assets(scraper_assets, project_dir, platform_id=plat)

@@ -9,6 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from studio import scraper_bridge, taxonomy
+from studio.platform_compat import detect_platforms
+from studio.safety import assess_content_safety
+
+# List reads omit `content` — full body is loaded via GET /api/asset only.
+_LIST_SELECT = """
+    a.id, a.owner, a.repo, a.path, a.source_repo, a.title, a.install_name, a.asset_type,
+    a.category, a.rank, a.stars, a.score, a.content_sha256, a.content_preview,
+    a.raw_url, a.branch, a.repo_pushed_at, a.synced_at, a.notes, a.source_type,
+    a.upvotes, a.downvotes, a.primary_domain
+"""
 from studio.app_settings import get_min_repo_stars
 from studio.database import get_connection, row_to_dict
 from studio.github_urls import blob_url, repo_url
@@ -50,7 +60,14 @@ class CatalogService:
             expand_registry(max_files_per_repo=150)
             with get_connection() as conn:
                 count = conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
+        self.backfill_platforms()
         return count
+
+    def backfill_platforms(self) -> int:
+        from studio.platform_compat import backfill_asset_platforms
+
+        with get_connection() as conn:
+            return backfill_asset_platforms(conn)
 
     def seed_from_manifests(self) -> int:
         entries = scraper_bridge.load_all_curated_entries()
@@ -67,6 +84,8 @@ class CatalogService:
             category = entry.get("category", "")
             rank = int(entry.get("rank") or 99)
             asset_type = entry.get("asset_type") or taxonomy.detect_asset_type(path)
+            manifest_platforms = entry.get("platforms")
+            platform_ids = detect_platforms(path, asset_type, manifest_platforms)
             domain = category
             classified = taxonomy.classify_asset("", path, category)
             tech = taxonomy.classify_tech_tags("", path)
@@ -100,6 +119,7 @@ class CatalogService:
                 primary_domain=classified.primary_domain,
                 secondary_domains=classified.secondary_domains,
                 tech_tags=tech,
+                platforms=platform_ids,
             )
             n += 1
         return n
@@ -112,22 +132,19 @@ class CatalogService:
         primary_domain: str | None = None,
         secondary_domains: list[str] | None = None,
         tech_tags: list[str] | None = None,
+        platforms: list[str] | None = None,
     ) -> None:
         row.setdefault("source_type", SOURCE_DISCOVERED)
         if primary_domain is None and domains:
             primary_domain = taxonomy.normalize_domain(domains[0])
-            secondary_domains = [
-                taxonomy.normalize_domain(d)
-                for d in domains[1:3]
-                if taxonomy.normalize_domain(d) != primary_domain
-            ]
+            secondary_domains = []
         elif primary_domain is None:
             text = row.get("content_preview") or row.get("content") or ""
             path = row.get("path", "")
             cat = row.get("category") or None
             classified = taxonomy.classify_asset(text, path, cat)
             primary_domain = classified.primary_domain
-            secondary_domains = classified.secondary_domains
+            secondary_domains = []
             if tech_tags is None:
                 tech_tags = taxonomy.classify_tech_tags(text, path)
 
@@ -186,6 +203,16 @@ class CatalogService:
                         "INSERT OR IGNORE INTO asset_tech_tags (asset_id, tag) VALUES (?, ?)",
                         (aid, tag),
                     )
+            path = row.get("path", "")
+            asset_type = row.get("asset_type", "skill")
+            manifest_hint = row.pop("_platforms", None) or platforms
+            platform_ids = detect_platforms(path, asset_type, manifest_hint)
+            conn.execute("DELETE FROM asset_platforms WHERE asset_id = ?", (aid,))
+            for pid in platform_ids:
+                conn.execute(
+                    "INSERT OR IGNORE INTO asset_platforms (asset_id, platform) VALUES (?, ?)",
+                    (aid, pid),
+                )
             conn.commit()
 
     def upsert_classification(
@@ -222,6 +249,7 @@ class CatalogService:
         asset_type: str | None = None,
         q: str | None = None,
         period: str = "all",
+        platform: str | None = None,
         limit: int = 500,
         offset: int = 0,
         include_all: bool = False,
@@ -251,6 +279,12 @@ class CatalogService:
             clauses.append("a.asset_type = ?")
             params.append(asset_type)
 
+        if platform and platform != "all":
+            clauses.append(
+                "EXISTS (SELECT 1 FROM asset_platforms p WHERE p.asset_id = a.id AND p.platform = ?)"
+            )
+            params.append(platform)
+
         if q:
             q_norm = q.strip()
             like = f"%{q_norm}%"
@@ -272,7 +306,7 @@ class CatalogService:
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = (
-            f"SELECT a.* FROM assets a {where} "
+            f"SELECT {_LIST_SELECT} FROM assets a {where} "
             "ORDER BY (a.upvotes - a.downvotes) DESC, a.stars DESC, a.title COLLATE NOCASE"
         )
 
@@ -282,7 +316,7 @@ class CatalogService:
             ).fetchone()[0]
             rows = conn.execute(f"{sql} LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
 
-        assets = [self._row_to_api(r) for r in rows]
+        assets = self._rows_to_api_list(rows)
 
         if period != "all" and PERIOD_MS.get(period):
             assets = [a for a in assets if self._in_period(a.get("repo_pushed_at", ""), period)]
@@ -299,26 +333,65 @@ class CatalogService:
         return api
 
     def trending(self, period: str = "week", limit: int = 20) -> list[dict[str, Any]]:
-        assets, _ = self.list_assets(period=period, limit=500)
-        return assets[:limit]
+        assets, _ = self.list_assets(period=period, limit=limit)
+        return assets
+
+    def leaderboard_by_domains(
+        self, domains: list[str], *, limit_per: int = 5
+    ) -> list[dict[str, Any]]:
+        """Top assets per domain in one query (avoids N× list_assets round-trips)."""
+        if not domains:
+            return []
+        doms = [taxonomy.normalize_domain(d) for d in domains]
+        placeholders = ",".join("?" * len(doms))
+        min_stars = get_min_repo_stars()
+        sql = f"""
+            WITH ranked AS (
+                SELECT a.id,
+                       COALESCE(NULLIF(TRIM(a.primary_domain), ''), 'docs-workflow') AS dom,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY COALESCE(NULLIF(TRIM(a.primary_domain), ''), 'docs-workflow')
+                           ORDER BY a.stars DESC, a.title COLLATE NOCASE
+                       ) AS rn
+                FROM assets a
+                WHERE (a.stars >= ? OR a.source_type = ?)
+            )
+            SELECT {_LIST_SELECT}
+            FROM assets a
+            INNER JOIN ranked r ON r.id = a.id AND r.rn <= ?
+            WHERE r.dom IN ({placeholders})
+            ORDER BY r.dom COLLATE NOCASE, r.rn
+        """
+        params: list[Any] = [min_stars, SOURCE_CUSTOM, limit_per, *doms]
+        with get_connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        assets = self._rows_to_api_list(rows)
+        by_dom: dict[str, list[dict[str, Any]]] = {d: [] for d in doms}
+        for a in assets:
+            dom = taxonomy.normalize_domain(a.get("primary_domain") or "docs-workflow")
+            if dom in by_dom and len(by_dom[dom]) < limit_per:
+                by_dom[dom].append(a)
+        labels = taxonomy.DOMAIN_LABELS
+        prof_order = {p["domain"]: p["label"] for p in taxonomy.DISCOVERY_PROFESSIONS}
+        out: list[dict[str, Any]] = []
+        for domain in doms:
+            items = by_dom.get(domain, [])
+            if not items:
+                continue
+            out.append(
+                {
+                    "domain": domain,
+                    "label": labels.get(domain, prof_order.get(domain, domain)),
+                    "items": [
+                        self._to_leaderboard_entry(a, rank=i + 1) for i, a in enumerate(items)
+                    ],
+                }
+            )
+        return out
 
     def by_domain(self, limit_per: int = 5) -> list[dict[str, Any]]:
-        labels = taxonomy.DOMAIN_LABELS
-        out: list[dict[str, Any]] = []
-        for prof in taxonomy.DISCOVERY_PROFESSIONS:
-            domain = prof["domain"]
-            items, _ = self.list_assets(domain=domain, limit=500)
-            items.sort(key=lambda a: (-(a.get("stars") or 0), a.get("title", "").lower()))
-            top = items[:limit_per]
-            if top:
-                out.append(
-                    {
-                        "domain": domain,
-                        "label": labels.get(domain, prof["label"]),
-                        "items": [self._to_leaderboard_entry(a, rank=i + 1) for i, a in enumerate(top)],
-                    }
-                )
-        return out
+        domains = [p["domain"] for p in taxonomy.DISCOVERY_PROFESSIONS]
+        return self.leaderboard_by_domains(domains, limit_per=limit_per)
 
     def list_repo_owners(self, *, include_all: bool = False) -> list[dict[str, Any]]:
         """Distinct GitHub owners in the registry (for Browse author filter)."""
@@ -369,8 +442,72 @@ class CatalogService:
             "last_sync": row_to_dict(last),
         }
 
+    def _load_related_maps(
+        self, conn, asset_ids: list[str]
+    ) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]]:
+        if not asset_ids:
+            return {}, {}, {}
+        placeholders = ",".join("?" * len(asset_ids))
+        domains: dict[str, list[str]] = {}
+        for aid, dom in conn.execute(
+            f"SELECT asset_id, domain FROM asset_domains WHERE asset_id IN ({placeholders})",
+            asset_ids,
+        ):
+            domains.setdefault(aid, []).append(dom)
+        tech: dict[str, list[str]] = {}
+        for aid, tag in conn.execute(
+            f"SELECT asset_id, tag FROM asset_tech_tags WHERE asset_id IN ({placeholders}) ORDER BY tag",
+            asset_ids,
+        ):
+            tech.setdefault(aid, []).append(tag)
+        platforms: dict[str, list[str]] = {}
+        for aid, plat in conn.execute(
+            f"SELECT asset_id, platform FROM asset_platforms WHERE asset_id IN ({placeholders}) ORDER BY platform",
+            asset_ids,
+        ):
+            platforms.setdefault(aid, []).append(plat)
+        return domains, tech, platforms
+
+    def _rows_to_api_list(self, rows: list[Any]) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+        dicts = [row_to_dict(r) or {} for r in rows]
+        ids = [d["id"] for d in dicts if d.get("id")]
+        with get_connection() as conn:
+            sec_map, tech_map, plat_map = self._load_related_maps(conn, ids)
+        return [
+            self._row_to_api_dict(
+                d,
+                secondary_domains=sec_map.get(d.get("id", ""), []),
+                tech_tags=tech_map.get(d.get("id", ""), []),
+                platform_ids=plat_map.get(d.get("id", ""), []),
+                include_content=False,
+            )
+            for d in dicts
+        ]
+
     def _row_to_api(self, row: Any) -> dict[str, Any]:
         d = row_to_dict(row) or {}
+        aid = d.get("id", "")
+        with get_connection() as conn:
+            sec_map, tech_map, plat_map = self._load_related_maps(conn, [aid] if aid else [])
+        return self._row_to_api_dict(
+            d,
+            secondary_domains=sec_map.get(aid, []),
+            tech_tags=tech_map.get(aid, []),
+            platform_ids=plat_map.get(aid, []),
+            include_content=True,
+        )
+
+    def _row_to_api_dict(
+        self,
+        d: dict[str, Any],
+        *,
+        secondary_domains: list[str],
+        tech_tags: list[str],
+        platform_ids: list[str],
+        include_content: bool,
+    ) -> dict[str, Any]:
         aid = d.get("id", "")
         source_repo = d.get("source_repo", "")
         path = d.get("path", "")
@@ -378,23 +515,12 @@ class CatalogService:
         primary = taxonomy.normalize_domain(
             d.get("primary_domain") or d.get("category") or "docs-workflow"
         )
-        with get_connection() as conn:
-            secondary = [
-                r[0]
-                for r in conn.execute(
-                    "SELECT domain FROM asset_domains WHERE asset_id = ?", (aid,)
-                ).fetchall()
-            ]
-            tech_tags = [
-                r[0]
-                for r in conn.execute(
-                    "SELECT tag FROM asset_tech_tags WHERE asset_id = ? ORDER BY tag",
-                    (aid,),
-                ).fetchall()
-            ]
-        domains = [primary, *[s for s in secondary if s != primary]]
+        if not platform_ids:
+            platform_ids = detect_platforms(path, d.get("asset_type", "skill"))
+        domains = [primary]
         gh_blob = blob_url(source_repo, branch, path) if source_repo and path else ""
         gh_repo = repo_url(source_repo) if source_repo else ""
+        preview = d.get("content_preview", "")
         return {
             "id": aid,
             "source_repo": source_repo,
@@ -404,14 +530,16 @@ class CatalogService:
                 d.get("asset_type", "skill"), d.get("asset_type", "skill")
             ),
             "primary_domain": primary,
-            "secondary_domains": secondary,
+            "secondary_domains": secondary_domains,
             "categories": domains,
             "domains": domains,
             "tech_tags": tech_tags,
+            "platforms": platform_ids,
             "score": d.get("score", 0),
             "stars": d.get("stars", 0),
-            "content_preview": d.get("content_preview", ""),
-            "content": d.get("content", ""),
+            "content_preview": preview,
+            "content_sha256": d.get("content_sha256", ""),
+            "content": d.get("content", "") if include_content else "",
             "install_name": d.get("install_name", ""),
             "raw_url": d.get("raw_url", ""),
             "branch": branch,
@@ -427,6 +555,7 @@ class CatalogService:
             "upvotes": d.get("upvotes", 0),
             "downvotes": d.get("downvotes", 0),
             "vote_score": int(d.get("upvotes", 0)) - int(d.get("downvotes", 0)),
+            "safety": assess_content_safety(preview, path).to_dict(),
         }
 
     def _to_leaderboard_entry(self, a: dict[str, Any], rank: int | None = None) -> dict[str, Any]:

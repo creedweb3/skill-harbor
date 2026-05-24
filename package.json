@@ -1,14 +1,17 @@
 {
   "name": "skill-harbor",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Skill Harbor — marketplace for Cursor agent skills, rules, commands, and subagents",
+  "description": "Skill Harbor — multi-platform agent skills marketplace (Cursor, Claude, Codex, Gemini, …)",
   "scripts": {
-    "predev": "node scripts/free-ports.mjs",
+    "predev": "node scripts/stop.mjs",
     "dev": "node scripts/dev.mjs",
-    "dev:api": "node scripts/free-ports.mjs && python scripts/dev-api.py",
-    "dev:ui": "cd frontend && npm run dev",
-    "dev:concurrent": "concurrently -n api,ui -c blue,green \"npm run dev:api\" \"npm run dev:ui\"",
+    "stop": "node scripts/stop.mjs",
+    "stop:api": "node scripts/stop.mjs --api",
+    "stop:ui": "node scripts/stop.mjs --ui",
+    "dev:api": "node scripts/run-api.mjs",
+    "dev:ui": "node scripts/run-ui.mjs",
+    "dev:concurrent": "node scripts/stop.mjs && concurrently -n api,ui -c blue,green \"node scripts/run-api.mjs --skip-stop\" \"node scripts/run-ui.mjs --skip-stop\"",
     "install:all": "cd frontend && npm install && cd ../backend && pip install -r requirements.txt",
     "build:ui": "cd frontend && npm run build"
   },

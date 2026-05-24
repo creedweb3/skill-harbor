@@ -11,6 +11,8 @@ type Props = Pick<
   | "setTypeFilter"
   | "hideInstalled"
   | "setHideInstalled"
+  | "hideIncompatible"
+  | "setHideIncompatible"
   | "installUser"
   | "setInstallUser"
   | "installProject"
@@ -35,6 +37,8 @@ export function DiscoverToolbar(props: Props) {
     setTypeFilter,
     hideInstalled,
     setHideInstalled,
+    hideIncompatible,
+    setHideIncompatible,
     installUser,
     setInstallUser,
     installProject,
@@ -87,6 +91,14 @@ export function DiscoverToolbar(props: Props) {
               onChange={(e) => setHideInstalled(e.target.checked)}
             />
             Hide installed
+          </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={hideIncompatible}
+              onChange={(e) => setHideIncompatible(e.target.checked)}
+            />
+            Platform-compatible only
           </label>
         </div>
         <div className="toolbar-row toolbar-row--end">

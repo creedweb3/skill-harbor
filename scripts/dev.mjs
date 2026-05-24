@@ -1,14 +1,26 @@
 /**
- * Stable local dev: API reload via watchfiles (not uvicorn --reload) + auto-restart UI if it dies.
+ * Skill Harbor local dev: API (watchfiles → uvicorn) + Vite UI.
+ * Always force-stops any prior dev instances before starting.
  */
 import { spawn } from "node:child_process";
+import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { freePortsAndWait } from "./free-ports.mjs";
+import { setTimeout as sleep } from "node:timers/promises";
+import {
+  apiScript,
+  DEV_PORTS,
+  frontendDir,
+  pythonCmd,
+  root,
+  viteArgs,
+  viteBin,
+} from "./dev-constants.mjs";
+import { forceStopDev, freePorts, portInUse } from "./free-ports.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const children = new Set();
 let shuttingDown = false;
+/** @type {import("node:child_process").ChildProcess | null} */
+let uiChild = null;
 
 function prefix(name, chunk) {
   const text = String(chunk);
@@ -17,31 +29,72 @@ function prefix(name, chunk) {
   }
 }
 
-function spawnNamed(name, shellCommand, cwd, { restart = false } = {}) {
-  const child = spawn(shellCommand, {
+/** @param {number} port @param {number} ms */
+async function waitForHttp(port, ms = 12000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const up = await new Promise((resolve) => {
+      const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
+        res.resume();
+        resolve(true);
+      });
+      req.on("error", () => resolve(false));
+      req.setTimeout(600, () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+    if (up) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
+/**
+ * @param {string} name
+ * @param {string} command
+ * @param {string[]} args
+ * @param {string} cwd
+ * @param {{ stdio?: "pipe" | "inherit" }} [opts]
+ */
+function spawnNamed(name, command, args, cwd, opts = {}) {
+  const stdio = opts.stdio ?? "pipe";
+  const child = spawn(command, args, {
     cwd,
-    shell: true,
+    shell: false,
+    stdio,
     env: { ...process.env, FORCE_COLOR: "1" },
-    windowsHide: true,
+    windowsHide: stdio === "pipe",
   });
   children.add(child);
 
-  child.stdout?.on("data", (d) => prefix(name, d));
-  child.stderr?.on("data", (d) => prefix(name, d));
+  if (stdio === "pipe") {
+    child.stdout?.on("data", (d) => prefix(name, d));
+    child.stderr?.on("data", (d) => prefix(name, d));
+  }
 
   child.on("exit", (code, signal) => {
     children.delete(child);
+    if (child === uiChild) uiChild = null;
     if (shuttingDown || signal === "SIGINT" || signal === "SIGTERM") return;
-    if (!restart) {
-      console.error(`\n[dev] ${name} exited (${code ?? signal}). Stopping.`);
-      shutdown(code ?? 1);
+
+    if (name === "ui") {
+      (async () => {
+        if (await waitForHttp(DEV_PORTS.ui, 500)) {
+          console.warn(
+            `[dev] Vite wrapper exited (${code ?? signal}) but :${DEV_PORTS.ui} still responds — leaving it running.`
+          );
+          return;
+        }
+        console.error(
+          `\n[dev] Vite stopped (${code ?? signal}). API still on :${DEV_PORTS.api} — run npm run dev to restart UI.`
+        );
+      })();
       return;
     }
-    console.warn(`\n[dev] ${name} exited (${code ?? signal}). Restarting in 2s…`);
-    setTimeout(async () => {
-      if (name === "ui") await freePortsAndWait([5173], 600);
-      spawnNamed(name, shellCommand, cwd, { restart });
-    }, 2000);
+
+    console.error(`\n[dev] ${name} exited (${code ?? signal}). Stopping.`);
+    shutdown(code ?? 1);
   });
 
   return child;
@@ -57,21 +110,62 @@ function shutdown(code = 0) {
       /* ignore */
     }
   }
+  freePorts([DEV_PORTS.ui, DEV_PORTS.api]);
   setTimeout(() => process.exit(code), 300);
 }
 
-console.log("[dev] Skill Harbor — freeing ports 5173 & 8765…");
-await freePortsAndWait([5173, 8765]);
+/** @param {number} maxAttempts */
+async function startVite(maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (portInUse(DEV_PORTS.ui)) {
+      console.warn(
+        `[dev] :${DEV_PORTS.ui} busy (attempt ${attempt}/${maxAttempts}) — freeing…`
+      );
+      await forceStopDev({ ports: [DEV_PORTS.ui], quiet: true });
+    }
 
-console.log("[dev] Starting API (watchfiles → uvicorn on :8765, reloads on .py changes)…");
-spawnNamed(
-  "api",
-  `python "${path.join(root, "scripts", "dev-api.py")}"`,
-  path.join(root, "backend")
+    console.log(`[dev] Starting UI (Vite on :${DEV_PORTS.ui})…`);
+    uiChild = spawnNamed("ui", process.execPath, [viteBin, ...viteArgs], frontendDir, {
+      stdio: "inherit",
+    });
+
+    if (await waitForHttp(DEV_PORTS.ui, 15000)) {
+      console.log(`[dev] UI ready → http://127.0.0.1:${DEV_PORTS.ui}/`);
+      return true;
+    }
+
+    try {
+      uiChild.kill("SIGTERM");
+    } catch {
+      /* ignore */
+    }
+    uiChild = null;
+    await forceStopDev({ ports: [DEV_PORTS.ui], quiet: true });
+
+    if (attempt < maxAttempts) {
+      console.warn(`[dev] Vite not ready — retry ${attempt + 1}/${maxAttempts}…`);
+      await sleep(800);
+    }
+  }
+
+  console.error(`[dev] Could not start Vite on :${DEV_PORTS.ui}. Run npm run stop, then npm run dev.`);
+  return false;
+}
+
+await forceStopDev();
+
+console.log(`[dev] Starting API (watchfiles → uvicorn on :${DEV_PORTS.api})…`);
+spawnNamed("api", pythonCmd, [apiScript], path.join(root, "backend"));
+
+await sleep(600);
+
+await startVite(3);
+
+console.log(
+  `[dev] Skill Harbor running\n` +
+    `      UI:  http://127.0.0.1:${DEV_PORTS.ui}/\n` +
+    `      API: http://127.0.0.1:${DEV_PORTS.api}/api/health`
 );
-
-console.log("[dev] Starting UI (Vite on :5173)…");
-spawnNamed("ui", "npm run dev", path.join(root, "frontend"), { restart: true });
 
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));

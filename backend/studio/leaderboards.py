@@ -37,13 +37,10 @@ CURATED_CATEGORY_TO_DOMAIN: dict[str, str] = {
 
 def build_leaderboards() -> dict[str, Any]:
     catalog = CatalogService()
-    catalog.ensure_seeded()
     stats = catalog.stats()
-    trending_raw = catalog.trending("all", limit=20)
-    top_picks = catalog.trending("all", limit=24)
-
-    trending = [catalog._to_leaderboard_entry(a) for a in trending_raw[:20]]
-    top = [catalog._to_leaderboard_entry(a) for a in top_picks[:24]]
+    top_assets = catalog.trending("all", limit=24)
+    trending = [catalog._to_leaderboard_entry(a) for a in top_assets[:20]]
+    top = [catalog._to_leaderboard_entry(a) for a in top_assets[:24]]
     by_domain = catalog.by_domain(5)
 
     return {

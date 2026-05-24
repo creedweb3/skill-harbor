@@ -1293,12 +1293,113 @@ input[type="checkbox"] {
   border-radius: var(--radius-lg);
 }
 
+.install-bar--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.install-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.platform-auto-badge {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border);
+}
+
+.install-bar-multi {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.install-multi-toggle {
+  font: inherit;
+  font-size: 0.8125rem;
+  background: none;
+  border: none;
+  color: var(--accent, #d97757);
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.install-multi-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.pill.safe {
+  background: rgba(34, 120, 80, 0.12);
+  color: #1a6b47;
+  border: 1px solid rgba(34, 120, 80, 0.25);
+}
+
 .install-bar-label {
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--muted);
   font-weight: 550;
+}
+
+.platform-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.platform-select--compact {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.platform-select-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  font-weight: 550;
+}
+
+.platform-select select {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated, var(--surface));
+  color: var(--text);
+  min-width: 10rem;
+}
+
+.platform-select-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.platform-tags .platform-tag {
+  font-size: 0.625rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border);
+}
+
+.platform-tags .platform-tag--active {
+  border-color: var(--accent, #d97757);
+  color: var(--accent, #d97757);
 }
 
 .card-surface {

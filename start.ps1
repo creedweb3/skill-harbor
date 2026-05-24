@@ -1,4 +1,4 @@
-# Start Cursor Skills Studio (API + UI)
+# Start Skill Harbor (API + UI). Stops any prior dev instances first.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -6,13 +6,13 @@ if (-not (Test-Path "node_modules")) {
   npm install
 }
 if (-not (Test-Path "frontend/node_modules")) {
-  Set-Location frontend
+  Push-Location frontend
   npm install
-  Set-Location ..
+  Pop-Location
 }
 
-Write-Host "Starting Cursor Skills Studio..." -ForegroundColor Cyan
+Write-Host "Starting Skill Harbor (stops any prior dev servers first)…" -ForegroundColor Cyan
 Write-Host "  UI:  http://127.0.0.1:5173" -ForegroundColor Green
 Write-Host "  API: http://127.0.0.1:8765/api/health" -ForegroundColor Green
-Write-Host "Keep this window open. If connection fails, check nothing else uses port 5173." -ForegroundColor DarkGray
+Write-Host "Press Ctrl+C to stop. Use 'npm run stop' from another terminal to force-stop." -ForegroundColor DarkGray
 npm run dev

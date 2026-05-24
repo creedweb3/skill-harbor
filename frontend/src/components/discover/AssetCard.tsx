@@ -1,15 +1,24 @@
-import type { Asset } from "../../api";
+import type { Asset, PlatformInfo } from "../../api";
 import { formatLabel, formatStars } from "../../lib/format";
 
 type Props = {
   asset: Asset;
   selected: boolean;
   onToggle: () => void;
+  platforms?: PlatformInfo[];
+  activePlatform?: string;
 };
 
-export function AssetCard({ asset: a, selected, onToggle }: Props) {
+export function AssetCard({
+  asset: a,
+  selected,
+  onToggle,
+  platforms = [],
+  activePlatform,
+}: Props) {
   const st = a.install_status;
   const installed = st?.status && st.status !== "none";
+  const labelFor = (id: string) => platforms.find((p) => p.id === id)?.label ?? id;
 
   return (
     <article
@@ -37,6 +46,19 @@ export function AssetCard({ asset: a, selected, onToggle }: Props) {
         />
         <span className={`type type-${a.asset_type}`}>{a.asset_type_label}</span>
         {a.curated ? <span className="pill curated">Curated</span> : null}
+        {a.safety?.verdict === "block" ? (
+          <span className="pill warn" title={a.safety.reason}>
+            Blocked
+          </span>
+        ) : a.safety?.warnings?.length ? (
+          <span className="pill" title={a.safety.warnings.join(", ")}>
+            Review
+          </span>
+        ) : a.safety?.safe ? (
+          <span className="pill safe" title="Passed Harbor safety scan">
+            Verified
+          </span>
+        ) : null}
         {installed ? (
           <span className="pill installed-pill">
             {st.status === "both" ? "Both scopes" : `Installed ${st.status}`}
@@ -59,6 +81,19 @@ export function AssetCard({ asset: a, selected, onToggle }: Props) {
       <h3>{a.curated_title || a.install_name}</h3>
       <p className="mono slug">{a.install_name}</p>
       <p className="preview">{a.content_preview.slice(0, 160)}…</p>
+      {(a.platforms?.length ?? 0) > 0 ? (
+        <ul className="tag-list platform-tags" aria-label="Compatible platforms">
+          {a.platforms!.slice(0, 5).map((pid) => (
+            <li
+              key={pid}
+              className={pid === activePlatform ? "platform-tag platform-tag--active" : "platform-tag"}
+            >
+              {labelFor(pid)}
+            </li>
+          ))}
+          {a.platforms!.length > 5 ? <li>+{a.platforms!.length - 5}</li> : null}
+        </ul>
+      ) : null}
       <ul className="tag-list" aria-label="Categories">
         {(a.domains ?? a.categories).slice(0, 4).map((c) => (
           <li key={c}>{formatLabel(c)}</li>

@@ -77,7 +77,7 @@ export function DiscoverView({ studio }: Props) {
         </div>
         <div className="discover-actions">
           <Button variant="primary" onClick={() => fetchCatalog()} disabled={busy}>
-            {busy ? "Working…" : "Fetch catalog"}
+            {busy ? "Working…" : "Reload catalog"}
           </Button>
           <Button
             variant="accent"

@@ -155,4 +155,17 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS asset_platforms (
+            asset_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            PRIMARY KEY (asset_id, platform),
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_asset_platforms_platform ON asset_platforms(platform)"
+    )
     conn.commit()

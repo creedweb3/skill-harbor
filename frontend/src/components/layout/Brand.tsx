@@ -13,7 +13,7 @@ export function Brand() {
       </div>
       <div>
         <h1>Skill Harbor</h1>
-        <p>Marketplace for Cursor skills, rules, commands & subagents</p>
+        <p>Agent skills marketplace — Cursor, Claude, Codex, Gemini & more</p>
       </div>
     </header>
   );

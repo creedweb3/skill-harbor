@@ -1,5 +1,5 @@
 """
-Skill Harbor — marketplace API for Cursor skills, rules, commands, and subagents.
+Skill Harbor — multi-platform agent skills marketplace API.
 
 Run: uvicorn main:app --reload --port 8765
 """
@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from studio import config, cursor_paths, export_import, leaderboards, scraper_bridge
+from studio import config, export_import, leaderboards, platform_paths, platforms, scraper_bridge
 from studio.admin_activity import list_activity, log_activity
 from studio.admin_analytics import get_dashboard
 from studio.admin_auth import (
@@ -32,8 +32,11 @@ from studio import sync as harbor_sync
 
 app = FastAPI(
     title="Skill Harbor",
-    description="By Devs, For Devs — marketplace API for Cursor skills, rules, commands, and subagents",
-    version="0.3.0",
+    description=(
+        "By Devs, For Devs — agent skills marketplace for Cursor, Claude, Codex, "
+        "Gemini, Antigravity, and more"
+    ),
+    version="0.4.0",
 )
 
 app.add_middleware(
@@ -51,11 +54,36 @@ app.add_middleware(
 catalog = CatalogService()
 
 
+def _discovery_bootstrap_payload() -> dict[str, Any]:
+    from studio.discovery_config import get_discovery_ui, resolve_profession_domains
+
+    cfg = get_discovery_ui()
+    return {"config": cfg, "profession_domains": resolve_profession_domains(cfg)}
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     catalog.ensure_seeded()
     bootstrap_harbor()
     _maybe_refresh_stars_background()
+
+    def _deferred_maint() -> None:
+        import threading
+
+        def _run() -> None:
+            try:
+                with get_connection() as conn:
+                    platform_rows = conn.execute(
+                        "SELECT COUNT(*) FROM asset_platforms"
+                    ).fetchone()[0]
+                if platform_rows == 0:
+                    catalog.backfill_platforms()
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    _deferred_maint()
 
 
 def _maybe_refresh_stars_background() -> None:
@@ -81,6 +109,9 @@ def _maybe_refresh_stars_background() -> None:
 
 class SettingsUpdate(BaseModel):
     project_dir: str | None = None
+    default_platform: str | None = None
+    platform_mode: str | None = Field(default=None, pattern="^(auto|manual)$")
+    extra_install_platforms: list[str] | None = None
 
 
 class AdminLoginBody(BaseModel):
@@ -97,6 +128,10 @@ class RegistrySettingsBody(BaseModel):
     max_files_per_repo_expand: int | None = Field(default=None, ge=10, le=500)
     discover_max_per_skills_query: int | None = Field(default=None, ge=1, le=100)
     discover_max_per_domain_query: int | None = Field(default=None, ge=1, le=100)
+
+
+class DiscoveryUiBody(BaseModel):
+    discovery_ui: dict[str, Any]
 
 
 class CreateAdminBody(BaseModel):
@@ -130,6 +165,8 @@ class InstallRequest(BaseModel):
     install_user: bool = True
     install_project: bool = False
     force: bool = False
+    platform: str | None = None
+    platforms: list[str] | None = None
 
 
 class RemoveAssetRequest(BaseModel):
@@ -184,6 +221,11 @@ def get_settings() -> dict[str, Any]:
         "stars_last_refreshed_at": config.get_last_stars_refresh_iso(),
         "stars_live": bool(config.get_last_stars_refresh() and config.get_admin_github_token()),
         "min_repo_stars": get_min_repo_stars(),
+        "default_platform": config.get_default_platform(),
+        "platform_mode": config.get_platform_mode(),
+        "extra_install_platforms": config.get_extra_install_platforms(),
+        "active_platform": config.resolve_active_platform(project),
+        "platform_auto_detect": config.get_platform_mode() == "auto",
     }
 
 
@@ -191,7 +233,24 @@ def get_settings() -> dict[str, Any]:
 def patch_settings(body: SettingsUpdate) -> dict[str, Any]:
     if body.project_dir is not None:
         config.set_project_dir(Path(body.project_dir))
+    if body.default_platform is not None:
+        config.set_default_platform(body.default_platform)
+    if body.platform_mode is not None:
+        config.set_platform_mode(body.platform_mode)
+    if body.extra_install_platforms is not None:
+        config.set_extra_install_platforms(body.extra_install_platforms)
     return get_settings()
+
+
+@app.get("/api/discovery/config")
+def get_discovery_config() -> dict[str, Any]:
+    from studio.discovery_config import get_discovery_ui, resolve_profession_domains
+
+    cfg = get_discovery_ui()
+    return {
+        "config": cfg,
+        "profession_domains": resolve_profession_domains(cfg),
+    }
 
 
 @app.get("/api/registry/meta")
@@ -261,6 +320,27 @@ def get_registry_settings(request: Request) -> dict[str, Any]:
 
     require_admin(request)
     return {"settings": app_settings.list_settings()}
+
+
+@app.get("/api/admin/settings/discovery")
+def get_admin_discovery_settings(request: Request) -> dict[str, Any]:
+    from studio.discovery_config import get_discovery_ui, resolve_profession_domains
+
+    require_admin(request)
+    cfg = get_discovery_ui()
+    return {"discovery_ui": cfg, "profession_domains": resolve_profession_domains(cfg)}
+
+
+@app.patch("/api/admin/settings/discovery")
+def patch_discovery_settings(body: DiscoveryUiBody, request: Request) -> dict[str, Any]:
+    from studio import app_settings
+    from studio.discovery_config import get_discovery_ui, resolve_profession_domains
+
+    user = require_admin(request)
+    app_settings.set_setting("discovery_ui", body.discovery_ui, updated_by=user["username"])
+    cfg = get_discovery_ui()
+    log_activity("settings.discovery", "discovery_ui", status="ok")
+    return {"discovery_ui": cfg, "profession_domains": resolve_profession_domains(cfg)}
 
 
 @app.patch("/api/admin/settings/registry")
@@ -340,21 +420,71 @@ def admin_refresh_stars(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/installed/updates")
-def installed_updates() -> dict[str, Any]:
+def installed_updates(platform: str | None = None) -> dict[str, Any]:
     from studio.installed_updates import check_installed_updates
 
-    items = check_installed_updates(config.get_project_dir())
-    return {"updates": items, "count": len(items)}
+    platform_id = platform or config.get_default_platform()
+    items = check_installed_updates(config.get_project_dir(), platform_id)
+    return {"updates": items, "count": len(items), "platform": platform_id}
+
+
+@app.get("/api/platforms")
+def list_platforms(include_planned: bool = True) -> dict[str, Any]:
+    specs = platforms.list_platforms(include_planned=include_planned)
+    project = config.get_project_dir()
+    return {
+        "platforms": [platforms.platform_to_dict(s) for s in specs],
+        "default_platform": config.get_default_platform(),
+        "platform_mode": config.get_platform_mode(),
+        "active_platform": config.resolve_active_platform(project),
+    }
+
+
+@app.get("/api/platforms/detect")
+def detect_platforms_endpoint() -> dict[str, Any]:
+    from studio.platform_detect import detect_installed_platforms
+
+    project = config.get_project_dir()
+    detection = detect_installed_platforms(project)
+    detection["platform_mode"] = config.get_platform_mode()
+    detection["manual_platform"] = config.get_default_platform()
+    return detection
+
+
+@app.post("/api/platforms/auto-detect")
+def apply_auto_detect_platform() -> dict[str, Any]:
+    from studio.platform_detect import detect_installed_platforms
+
+    project = config.get_project_dir()
+    detection = detect_installed_platforms(project)
+    recommended = detection.get("recommended_platform") or "cursor"
+    config.set_platform_mode("auto")
+    config.set_default_platform(recommended)
+    return {
+        **detection,
+        "platform_mode": "auto",
+        "active_platform": config.resolve_active_platform(project),
+    }
+
+
+@app.get("/api/safety/verify")
+def verify_registry_safety() -> dict[str, Any]:
+    from studio.safety import purge_unsafe_assets
+
+    return {"purge": purge_unsafe_assets()}
 
 
 @app.get("/api/connection")
-def connection() -> dict[str, Any]:
+def connection(platform: str | None = None) -> dict[str, Any]:
+    platform_id = platform or config.resolve_active_platform(config.get_project_dir())
     project = config.get_project_dir()
-    info = cursor_paths.cursor_connection_info(project)
+    info = platform_paths.connection_info(project, platform_id)
+    spec = platforms.get_platform(platform_id)
     info["note"] = (
-        "Cursor reads skills from ~/.cursor/skills/ (global) and "
-        "<project>/.cursor/skills/ (project). Restart Cursor or open a new "
-        "Agent chat after installing."
+        f"{spec.label} reads skills from "
+        f"~/{spec.global_root}/{spec.skill_subdir}/ (global) and "
+        f"<project>/{spec.project_root}/{spec.skill_subdir}/ (project). "
+        f"{spec.restart_hint}"
     )
     return info
 
@@ -374,32 +504,79 @@ def get_leaderboards() -> dict[str, Any]:
     return leaderboards.build_leaderboards()
 
 
+@app.get("/api/bootstrap")
+def api_bootstrap(platform: str | None = None) -> dict[str, Any]:
+    """One round-trip for initial UI load (settings, meta, leaderboards, catalog slice)."""
+    project = config.get_project_dir()
+    active = platform or config.resolve_active_platform(project)
+    stats = catalog.stats()
+    assets, total = catalog.list_assets(
+        platform=active,
+        limit=250,
+        offset=0,
+    )
+    enriched = harbor_sync.enrich_catalog_assets(assets, project, platform_id=active)
+    return {
+        "settings": {
+            "project_dir": str(project),
+            "default_platform": config.get_default_platform(),
+            "platform_mode": config.get_platform_mode(),
+            "extra_install_platforms": config.get_extra_install_platforms(),
+            "active_platform": active,
+            "asset_count": stats.get("total_assets", 0),
+            "synced_content_count": stats.get("synced_content", 0),
+            "last_synced_at": (stats.get("last_sync") or {}).get("finished_at"),
+            "stars_last_refreshed_at": config.get_last_stars_refresh_iso(),
+            "stars_live": bool(config.get_last_stars_refresh() and config.get_admin_github_token()),
+        },
+        "connection": platform_paths.connection_info(project, active),
+        "categories": scraper_bridge.list_category_meta(),
+        "discovery": _discovery_bootstrap_payload(),
+        "leaderboards": leaderboards.build_leaderboards(),
+        "platforms": {
+            "platforms": [
+                platforms.platform_to_dict(s)
+                for s in platforms.list_platforms(include_planned=True)
+            ],
+            "default_platform": config.get_default_platform(),
+            "platform_mode": config.get_platform_mode(),
+            "active_platform": active,
+        },
+        "catalog": {"assets": enriched, "total": total},
+    }
+
+
 @app.get("/api/catalog")
 def get_catalog(
     domain: str | None = None,
     tech: str | None = None,
     asset_type: str | None = None,
+    platform: str | None = None,
     q: str | None = None,
     period: str = "all",
     limit: int = 200,
     offset: int = 0,
+    include_stats: bool = False,
 ) -> dict[str, Any]:
+    # Local registry can be 3k+ rows; allow large pages for Browse (client paginates).
+    cap = min(max(limit, 1), 5000)
     assets, total = catalog.list_assets(
         domain=domain,
         tech_tag=tech,
         asset_type=asset_type,
+        platform=platform,
         q=q,
         period=period,
-        limit=min(limit, 5000),
+        limit=cap,
         offset=offset,
     )
     project = config.get_project_dir()
-    enriched = harbor_sync.enrich_catalog_assets(assets, project)
-    return {
-        "assets": enriched,
-        "total": total,
-        "stats": catalog.stats(),
-    }
+    active_platform = platform or config.resolve_active_platform(project)
+    enriched = harbor_sync.enrich_catalog_assets(assets, project, platform_id=active_platform)
+    out: dict[str, Any] = {"assets": enriched, "total": total}
+    if include_stats:
+        out["stats"] = catalog.stats()
+    return out
 
 
 class VoteBody(VoteRequest):
@@ -412,7 +589,9 @@ def get_asset_detail(id: str, voter_id: str | None = None) -> dict[str, Any]:
     if not row:
         raise HTTPException(404, f"Asset not found: {id}")
     project = config.get_project_dir()
-    enriched = harbor_sync.enrich_catalog_assets([row], project)
+    enriched = harbor_sync.enrich_catalog_assets(
+        [row], project, platform_id=config.get_default_platform()
+    )
     asset = enriched[0] if enriched else row
     asset["content"] = row.get("content", "")
     if voter_id:
@@ -748,7 +927,9 @@ def preview(body: PreviewRequest) -> dict[str, Any]:
     """Backward compat — returns catalog from DB."""
     assets, total = catalog.list_assets(limit=500)
     project = config.get_project_dir()
-    enriched = harbor_sync.enrich_catalog_assets(assets, project)
+    enriched = harbor_sync.enrich_catalog_assets(
+        assets, project, platform_id=config.get_default_platform()
+    )
     if body.categories:
         cat_set = set(body.categories)
         enriched = [
@@ -772,6 +953,10 @@ def install(body: InstallRequest) -> dict[str, Any]:
     if not body.install_user and not body.install_project:
         raise HTTPException(400, "Select at least one install target")
     try:
+        primary = body.platform or config.resolve_active_platform(config.get_project_dir())
+        target_platforms = body.platforms if body.platforms else [primary]
+        if primary not in target_platforms:
+            target_platforms = [primary, *target_platforms]
         return scraper_bridge.install_assets(
             body.assets,
             install_user=body.install_user,
@@ -779,6 +964,8 @@ def install(body: InstallRequest) -> dict[str, Any]:
             project_dir=config.get_project_dir(),
             force=body.force,
             token=config.get_github_token(),
+            platform_id=primary,
+            platforms=target_platforms,
         )
     except Exception as e:
         raise HTTPException(500, str(e)) from e
@@ -788,15 +975,17 @@ def install(body: InstallRequest) -> dict[str, Any]:
 def export_cursor_backup(
     include_user: bool = True,
     include_project: bool = True,
+    platform: str | None = None,
 ) -> dict[str, Any]:
     return export_import.export_bundle(
         user=include_user,
         project_dir=config.get_project_dir(),
+        platform_id=platform or config.get_default_platform(),
     )
 
 
 @app.post("/api/import")
-def import_cursor_backup(body: ImportRequest) -> dict[str, Any]:
+def import_cursor_backup(body: ImportRequest, platform: str | None = None) -> dict[str, Any]:
     try:
         return export_import.import_bundle(
             body.bundle,
@@ -804,6 +993,7 @@ def import_cursor_backup(body: ImportRequest) -> dict[str, Any]:
             import_project=body.import_project,
             project_dir=config.get_project_dir(),
             force=body.force,
+            platform_id=platform or config.get_default_platform(),
         )
     except Exception as e:
         raise HTTPException(500, str(e)) from e
@@ -814,12 +1004,14 @@ def remove_asset(
     asset_type: str,
     name: str,
     scope: str = "user",
+    platform: str | None = None,
 ) -> dict[str, Any]:
+    platform_id = platform or config.get_default_platform()
     if scope == "user":
-        root = cursor_paths.user_cursor_root()
+        root = platform_paths.user_root(platform_id)
     else:
-        root = cursor_paths.project_cursor_root(config.get_project_dir())
-    ok = cursor_paths.remove_asset(root, name, asset_type)
+        root = platform_paths.project_root(config.get_project_dir(), platform_id)
+    ok = platform_paths.remove_asset(root, name, asset_type, platform_id)
     if not ok:
         raise HTTPException(404, f"Not found: {asset_type}/{name}")
     return {"removed": name, "scope": scope, "asset_type": asset_type}

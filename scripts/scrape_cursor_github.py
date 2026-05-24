@@ -516,6 +516,11 @@ def is_candidate_path(path: str) -> str | None:
                 "/skills/",
                 "/.cursor/skills/",
                 "/.claude/skills/",
+                "/.codex/skills/",
+                "/.gemini/skills/",
+                "/.agent/skills/",
+                "/.windsurf/skills/",
+                "/.cline/skills/",
                 "/agent-skills/",
                 "/capabilities/",
             )
@@ -531,7 +536,16 @@ def is_candidate_path(path: str) -> str | None:
     if name.endswith(".mdc"):
         if any(
             marker in normalized
-            for marker in ("/rules/", "/.cursor/rules/", "/.claude/rules/")
+            for marker in (
+                "/rules/",
+                "/.cursor/rules/",
+                "/.claude/rules/",
+                "/.codex/rules/",
+                "/.gemini/",
+                "/.agent/rules/",
+                "/.windsurf/",
+                "/.cline/",
+            )
         ):
             return "rule"
         if lower.endswith(".mdc") and lower.count("/") <= 1:
@@ -539,7 +553,9 @@ def is_candidate_path(path: str) -> str | None:
 
     if name.endswith(".md") and "/.cursor/commands/" in normalized:
         return "command"
-    if name.endswith(".md") and "/.cursor/agents/" in normalized:
+    if name.endswith(".md") and any(
+        m in normalized for m in ("/.cursor/agents/", "/.claude/agents/", "/.agent/agents/")
+    ):
         return "agent"
     if name == ".cursorrules":
         return "rule"

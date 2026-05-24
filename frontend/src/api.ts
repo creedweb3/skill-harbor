@@ -18,12 +18,14 @@ export type Asset = {
   primary_domain?: string;
   secondary_domains?: string[];
   tech_tags?: string[];
+  platforms?: string[];
   branch?: string;
   github_blob_url?: string;
   github_repo_url?: string;
   score: number;
   stars: number;
   content_preview: string;
+  content_sha256?: string;
   content?: string;
   install_name: string;
   raw_url: string;
@@ -37,6 +39,12 @@ export type Asset = {
   downvotes?: number;
   vote_score?: number;
   user_vote?: number;
+  safety?: {
+    safe: boolean;
+    reason: string;
+    warnings: string[];
+    verdict: "pass" | "block";
+  };
 };
 
 export type CategoryGroup = {
@@ -45,7 +53,38 @@ export type CategoryGroup = {
   categories: string[];
 };
 
+export type PlatformInfo = {
+  id: string;
+  label: string;
+  vendor: string;
+  status: "stable" | "beta" | "planned";
+  description: string;
+  global_root: string;
+  project_root: string;
+  supported_assets: string[];
+  installable: boolean;
+  docs_url?: string | null;
+  restart_hint?: string;
+};
+
+export type PlatformsResponse = {
+  platforms: PlatformInfo[];
+  default_platform: string;
+};
+
 export type ConnectionInfo = {
+  platform?: string;
+  platform_label?: string;
+  platform_status?: string;
+  vendor?: string;
+  global_root?: string;
+  global_exists?: boolean;
+  project_root?: string;
+  project_exists?: boolean;
+  supported_assets?: string[];
+  installable?: boolean;
+  restart_hint?: string;
+  docs_url?: string | null;
   user_cursor_dir: string;
   user_exists: boolean;
   project_dir: string;
@@ -203,34 +242,144 @@ export const getSettings = () =>
     stars_last_refreshed_at?: string | null;
     stars_live?: boolean;
     min_repo_stars: number;
+    default_platform?: string;
+    platform_mode?: "auto" | "manual";
+    extra_install_platforms?: string[];
+    active_platform?: string;
+    platform_auto_detect?: boolean;
   }>("/api/settings");
+
+export type PlatformDetection = {
+  detected: {
+    id: string;
+    label: string;
+    status: string;
+    score: number;
+    global_root: string;
+    global_exists: boolean;
+    project_root: string;
+    project_exists: boolean;
+  }[];
+  recommended_platform: string;
+  count: number;
+  platform_mode?: string;
+  active_platform?: string;
+};
+
+export const getPlatforms = (includePlanned = true) =>
+  api<PlatformsResponse>(`/api/platforms?include_planned=${includePlanned}`);
+
+export type DiscoveryUiConfig = {
+  version?: number;
+  layout?: { columns?: number; rows?: number };
+  limits?: {
+    profession_domain_count?: number;
+    items_per_domain?: number;
+    trending_limit?: number;
+    for_you_limit?: number;
+  };
+  profession_domains?: string[];
+  rotate_domains?: boolean;
+  rotation_week_offset?: number;
+};
+
+export type DiscoveryBootstrap = {
+  config: DiscoveryUiConfig;
+  profession_domains: DiscoveryProfession[];
+};
+
+export type BootstrapResponse = {
+  settings: {
+    project_dir: string;
+    default_platform: string;
+    platform_mode: "auto" | "manual";
+    extra_install_platforms: string[];
+    active_platform: string;
+    asset_count: number;
+    synced_content_count: number;
+    last_synced_at?: string;
+    stars_last_refreshed_at?: string | null;
+    stars_live?: boolean;
+  };
+  connection: ConnectionInfo;
+  categories: CategoriesResponse;
+  discovery: DiscoveryBootstrap;
+  leaderboards: LeaderboardsResponse;
+  platforms: PlatformsResponse;
+  catalog: { assets: Asset[]; total: number };
+};
+
+export const getBootstrap = (platform?: string) => {
+  const q = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+  return api<BootstrapResponse>(`/api/bootstrap${q}`);
+};
+
+export const getPlatformDetect = () => api<PlatformDetection>("/api/platforms/detect");
+
+export const postAutoDetectPlatform = () =>
+  api<PlatformDetection>("/api/platforms/auto-detect", { method: "POST" });
 
 export type CatalogResponse = {
   assets: Asset[];
   total: number;
-  stats: {
+  stats?: {
     total_assets: number;
     synced_content: number;
     last_sync?: Record<string, unknown>;
   };
 };
 
+export const CATALOG_PAGE_SIZE = 2000;
+
 export const getCatalog = (params?: {
   domain?: string;
   asset_type?: string;
+  platform?: string;
   q?: string;
   period?: string;
   limit?: number;
+  offset?: number;
+  include_stats?: boolean;
 }) => {
   const sp = new URLSearchParams();
   if (params?.domain) sp.set("domain", params.domain);
   if (params?.asset_type) sp.set("asset_type", params.asset_type);
+  if (params?.platform) sp.set("platform", params.platform);
   if (params?.q) sp.set("q", params.q);
   if (params?.period) sp.set("period", params.period);
   if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.offset) sp.set("offset", String(params.offset));
+  if (params?.include_stats) sp.set("include_stats", "true");
   const q = sp.toString();
   return api<CatalogResponse>(`/api/catalog${q ? `?${q}` : ""}`);
 };
+
+/** Load every catalog row (paginated) for Browse / install selection. */
+export async function fetchAllCatalog(
+  params?: Omit<Parameters<typeof getCatalog>[0], "limit" | "offset">
+): Promise<CatalogResponse> {
+  const pageSize = CATALOG_PAGE_SIZE;
+  let offset = 0;
+  const all: Asset[] = [];
+  let total = 0;
+  let stats: CatalogResponse["stats"];
+
+  while (true) {
+    const page = await getCatalog({
+      ...params,
+      limit: pageSize,
+      offset,
+      include_stats: offset === 0,
+    });
+    all.push(...page.assets);
+    total = page.total;
+    if (offset === 0) stats = page.stats;
+    if (all.length >= total || page.assets.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return { assets: all, total, stats };
+}
 
 export const getAssetDetail = (id: string, voterId?: string) => {
   const sp = new URLSearchParams({ id });
@@ -323,6 +472,22 @@ export type RegistrySetting = {
 
 export const getRegistrySettings = () =>
   api<{ settings: RegistrySetting[] }>("/api/admin/settings/registry", { admin: true });
+
+export const getDiscoverySettings = () =>
+  api<{ discovery_ui: DiscoveryUiConfig; profession_domains: DiscoveryProfession[] }>(
+    "/api/admin/settings/discovery",
+    { admin: true }
+  );
+
+export const patchDiscoverySettings = (discovery_ui: DiscoveryUiConfig) =>
+  api<{ discovery_ui: DiscoveryUiConfig; profession_domains: DiscoveryProfession[] }>(
+    "/api/admin/settings/discovery",
+    {
+      admin: true,
+      method: "PATCH",
+      body: JSON.stringify({ discovery_ui }),
+    }
+  );
 
 export const patchRegistrySettings = (body: {
   min_repo_stars?: number;
@@ -445,10 +610,18 @@ export const postRegistryExpand = () => postAdminRegistryExpand();
 export const getSyncStatus = () =>
   api<{ last_sync: Record<string, unknown>; stats: CatalogResponse["stats"] }>("/api/sync/status");
 
-export const patchSettings = (body: { project_dir?: string }) =>
+export const patchSettings = (body: {
+  project_dir?: string;
+  default_platform?: string;
+  platform_mode?: "auto" | "manual";
+  extra_install_platforms?: string[];
+}) =>
   api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
 
-export const getConnection = () => api<ConnectionInfo>("/api/connection");
+export const getConnection = (platform?: string) => {
+  const q = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+  return api<ConnectionInfo>(`/api/connection${q}`);
+};
 
 export const getInstalledUpdates = () =>
   api<{ updates: InstalledUpdate[]; count: number }>("/api/installed/updates");
@@ -488,8 +661,16 @@ export const postInstall = (body: {
   install_user: boolean;
   install_project: boolean;
   force: boolean;
+  platform?: string;
+  platforms?: string[];
 }) =>
-  api<{ installed: { user: string[]; project: string[] }; errors: string[] }>(
+  api<{
+    installed: { user: string[]; project: string[] };
+    errors: string[];
+    platform?: string;
+    platforms?: string[];
+    installed_by_platform?: Record<string, { user: string[]; project: string[] }>;
+  }>(
     "/api/install",
     { method: "POST", body: JSON.stringify(body) }
   );
