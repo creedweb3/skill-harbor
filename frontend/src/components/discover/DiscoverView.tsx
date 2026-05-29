@@ -1,5 +1,4 @@
 import type { Studio } from "../../hooks/useStudio";
-import { ActivityLog } from "../ActivityLog";
 import { Button } from "../ui/Button";
 import { CustomSearchView } from "./CustomSearchView";
 import { DiscoverModeSwitch } from "./DiscoverModeSwitch";
@@ -20,9 +19,6 @@ export function DiscoverView({ studio }: Props) {
     fetchCatalog,
     runInstall,
     refresh,
-    log,
-    logOpen,
-    setLogOpen,
     backendReady,
   } = studio;
 
@@ -101,8 +97,6 @@ export function DiscoverView({ studio }: Props) {
       ) : (
         <CustomSearchView studio={studio} />
       )}
-
-      <ActivityLog log={log} logOpen={logOpen} setLogOpen={setLogOpen} />
     </main>
   );
 }

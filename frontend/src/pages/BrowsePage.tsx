@@ -3,6 +3,7 @@ import type { Studio } from "../hooks/useStudio";
 import { VirtualBrowseGrid } from "../components/browse/VirtualBrowseGrid";
 import { FilterChips } from "../components/browse/FilterChips";
 import { MultiSelectDropdown } from "../components/browse/MultiSelectDropdown";
+import { SingleSelectDropdown } from "../components/browse/SingleSelectDropdown";
 import { ActionToolbar, ActionToolbarDivider } from "../components/layout/ActionToolbar";
 import { HarborEmpty } from "../components/ui/HarborEmpty";
 import { SelectionPill } from "../components/ui/SelectionPill";
@@ -15,7 +16,15 @@ const TYPE_OPTIONS = [
   { value: "agent", label: "Agents" },
 ];
 
-type SortKey = "stars" | "votes" | "name";
+const SORT_OPTIONS = [
+  { value: "stars", label: "Stars" },
+  { value: "votes", label: "Votes" },
+  { value: "name", label: "Name" },
+] as const;
+
+const PAGE_SIZE = 48;
+
+type SortKey = (typeof SORT_OPTIONS)[number]["value"];
 
 type Props = {
   studio: Studio;
@@ -47,6 +56,7 @@ export function BrowsePage({ studio, searchRef }: Props) {
   const [domainFilters, setDomainFilters] = useState<Set<string>>(() => new Set());
   const [stackFilters, setStackFilters] = useState<Set<string>>(() => new Set());
   const [sortBy, setSortBy] = useState<SortKey>("stars");
+  const [page, setPage] = useState(1);
   const pageRef = useRef<HTMLDivElement>(null);
 
   const domainOptions = useMemo(() => {
@@ -122,11 +132,26 @@ export function BrowsePage({ studio, searchRef }: Props) {
     return sorted;
   }, [browseAssets, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
 
-  const useVirtualGrid = shown.length > 0;
-  const shownIds = useMemo(() => shown.map((a) => a.id), [shown]);
-  const allShownSelected =
-    shownIds.length > 0 && shownIds.every((id) => selectedIds.has(id));
-  const someSelected = shownIds.some((id) => selectedIds.has(id));
+  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const pageStart = shown.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(page * PAGE_SIZE, shown.length);
+  const pageItems = useMemo(
+    () => shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [shown, page]
+  );
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
+
+  const useVirtualGrid = pageItems.length > 0;
+  const pageIds = useMemo(() => pageItems.map((a) => a.id), [pageItems]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const hasQueue = selectedIds.size > 0;
 
   const activeFilterCount =
     (authorFilters.size ? 1 : 0) +
@@ -146,7 +171,7 @@ export function BrowsePage({ studio, searchRef }: Props) {
 
   useEffect(() => {
     pageRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [search, authorFilters, typeFilters, domainFilters, stackFilters, sortBy]);
+  }, [search, authorFilters, typeFilters, domainFilters, stackFilters, sortBy, page]);
 
   const filterChips = useMemo(() => {
     const chips: { key: string; label: string; onRemove: () => void }[] = [];
@@ -208,13 +233,13 @@ export function BrowsePage({ studio, searchRef }: Props) {
   return (
     <div ref={pageRef} className="harbor-page browse-page">
       <header className="browse-toolbar">
-        <div className="browse-toolbar__panel harbor-action-bar harbor-action-bar--stacked">
+        <div className="browse-toolbar__panel">
         <div className="browse-toolbar__row browse-toolbar__row--search">
           <div className="browse-search-wrap">
             <input
               ref={searchRef}
               type="search"
-              className="browse-toolbar__search"
+              className="browse-toolbar__search harbor-chrome-input"
               placeholder="Search by skill name, author, or repo…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -224,16 +249,14 @@ export function BrowsePage({ studio, searchRef }: Props) {
               /
             </kbd>
           </div>
-          <select
-            className="harbor-action-bar__select browse-toolbar__sort"
+          <SingleSelectDropdown
+            className="browse-toolbar__sort"
+            label="Sort"
+            options={[...SORT_OPTIONS]}
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            onChange={(v) => setSortBy(v as SortKey)}
             aria-label="Sort assets"
-          >
-            <option value="stars">Sort: Stars</option>
-            <option value="votes">Sort: Votes</option>
-            <option value="name">Sort: Name</option>
-          </select>
+          />
         </div>
         <div className="browse-toolbar__row browse-toolbar__row--filters">
           <MultiSelectDropdown
@@ -262,38 +285,40 @@ export function BrowsePage({ studio, searchRef }: Props) {
           />
         </div>
         <FilterChips chips={filterChips} onClearAll={filterChips.length > 1 ? clearFilters : undefined} />
+        </div>
         <ActionToolbar
           className="browse-toolbar__actions"
           count={
             shown.length === 0
               ? `0 matches · ${registryTotal.toLocaleString()} in registry`
-              : shown.length === registryTotal
-                ? `${shown.length.toLocaleString()} assets`
-                : `${shown.length.toLocaleString()} matches · ${registryTotal.toLocaleString()} in registry`
+              : shown.length > PAGE_SIZE
+                ? `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${shown.length.toLocaleString()}`
+                : shown.length === registryTotal
+                  ? `${shown.length.toLocaleString()} assets`
+                  : `${shown.length.toLocaleString()} matches · ${registryTotal.toLocaleString()} in registry`
           }
         >
           <SelectionPill
-            pressed={allShownSelected}
-            onClick={() => toggleSelectAllForIds(shownIds)}
-            disabled={shown.length === 0}
+            pressed={allPageSelected}
+            onClick={() => toggleSelectAllForIds(pageIds)}
+            disabled={pageItems.length === 0}
           >
-            {allShownSelected ? "Deselect shown" : "Select shown"}
+            {allPageSelected ? "Deselect page" : "Select page"}
           </SelectionPill>
           <SelectionPill pressed={false} onClick={deselectAll} disabled={selectedIds.size === 0}>
             Deselect all
           </SelectionPill>
-          {someSelected ? (
+          {hasQueue ? (
             <>
               <ActionToolbarDivider />
               <span className="browse-toolbar__selected">{selectedIds.size} in queue</span>
             </>
           ) : null}
         </ActionToolbar>
-        </div>
       </header>
       {useVirtualGrid ? (
         <VirtualBrowseGrid
-          items={shown}
+          items={pageItems}
           scrollRef={pageRef}
           selectedAssetId={selectedAssetId}
           selectedIds={selectedIds}
@@ -324,6 +349,45 @@ export function BrowsePage({ studio, searchRef }: Props) {
             </button>
           )}
         </HarborEmpty>
+      ) : null}
+      {shown.length > PAGE_SIZE ? (
+        <nav className="browse-pagination" aria-label="Browse pages">
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage(1)}
+            disabled={page <= 1}
+          >
+            First
+          </button>
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+          >
+            Previous
+          </button>
+          <span className="browse-pagination__status">
+            Page {page.toLocaleString()} of {totalPages.toLocaleString()}
+          </span>
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Next
+          </button>
+          <button
+            type="button"
+            className="harbor-btn harbor-btn--ghost harbor-btn--sm"
+            onClick={() => setPage(totalPages)}
+            disabled={page >= totalPages}
+          >
+            Last
+          </button>
+        </nav>
       ) : null}
     </div>
   );

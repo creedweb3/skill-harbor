@@ -12,7 +12,7 @@ import { InstalledCard } from "../components/installed/InstalledCard";
 type Props = { studio: Studio };
 
 export function InstalledPage({ studio }: Props) {
-  const { installedItems, connection, busy, runExport, runImport, onRemove, refresh, pushLog } =
+  const { installedItems, connection, busy, runExport, runImport, onRemove, refresh, runUserActivity, pushLog } =
     studio;
   const [updates, setUpdates] = useState<InstalledUpdate[]>([]);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -46,7 +46,7 @@ export function InstalledPage({ studio }: Props) {
   const runUpdate = async (u: InstalledUpdate) => {
     const key = `${u.scope}:${u.asset_type}:${u.name}`;
     setUpdating(key);
-    try {
+    await runUserActivity(`Update ${u.name}`, async () => {
       const asset = await getAssetDetail(u.registry_asset_id);
       await postInstall({
         assets: [asset],
@@ -57,11 +57,9 @@ export function InstalledPage({ studio }: Props) {
       pushLog(`Updated ${u.name} (${u.scope})`, "ok");
       await loadUpdates();
       await refresh({ silent: true });
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setUpdating(null);
-    }
+      return { summary: `Updated ${u.name} (${u.scope})`, status: "ok" };
+    });
+    setUpdating(null);
   };
 
   const updateAll = async () => {

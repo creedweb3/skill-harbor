@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "./components/layout/AppShell";
 import type { AppTab } from "./components/layout/SideNav";
-import { ActivityLog } from "./components/ActivityLog";
 import { HarborBootScreen } from "./components/ui/HarborBootScreen";
 import { useHarborShortcuts } from "./hooks/useHarborShortcuts";
 import { useStudio } from "./hooks/useStudio";
@@ -12,11 +11,14 @@ import {
   setDomainHash,
   viewFromDomainSlug,
 } from "./lib/domainHash";
+import { clearRepoHash, parseRepoHash } from "./lib/repoHash";
 import { AssetDetailPage } from "./pages/AssetDetailPage";
 import { BrowsePage } from "./pages/BrowsePage";
 import { DiscoveryPage } from "./pages/DiscoveryPage";
 import { DomainsRouterPage } from "./pages/DomainsRouterPage";
 import { InstalledPage } from "./pages/InstalledPage";
+import { ActivityPage } from "./pages/ActivityPage";
+import { RepoDetailPage } from "./pages/RepoDetailPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import "./App.css";
 import "./styles/tokens.css";
@@ -26,6 +28,12 @@ const BOOT_DELAY_MS = 90;
 
 export default function App() {
   const studio = useStudio();
+  const {
+    backendReady,
+    discoveryPanelProfessions,
+    openRepo,
+    closeRepo,
+  } = studio;
   const [tab, setTab] = useState<AppTab>("discovery");
   const [discoverySectionView, setDiscoverySectionView] =
     useState<DiscoverySectionView | null>(null);
@@ -62,7 +70,9 @@ export default function App() {
       setDomainView(null);
       clearDomainHash();
     }
-  }, []);
+    closeRepo();
+    clearRepoHash();
+  }, [closeRepo]);
 
   const onOpenDomain = useCallback(
     (view: DiscoverySectionView) => {
@@ -77,13 +87,25 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!studio.backendReady) return;
+    if (!backendReady) return;
 
     const applyHash = () => {
+      const repo = parseRepoHash(window.location.hash);
+      if (repo) {
+        setTab("discovery");
+        setDiscoverySectionView(null);
+        setDomainView(null);
+        clearDomainHash();
+        openRepo(repo);
+        return;
+      }
+
       const slug = parseDomainHash(window.location.hash);
       if (!slug) return;
-      const view = viewFromDomainSlug(slug, studio.discoveryPanelProfessions);
+      const view = viewFromDomainSlug(slug, discoveryPanelProfessions);
       if (view) {
+        closeRepo();
+        clearRepoHash();
         setTab("domains");
         setDomainView(view);
         setDiscoverySectionView(null);
@@ -93,7 +115,7 @@ export default function App() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, [studio.backendReady, studio.discoveryPanelProfessions]);
+  }, [backendReady, discoveryPanelProfessions, openRepo, closeRepo]);
 
   const main = studio.initOffline ? (
     <div className="harbor-page harbor-page--offline">
@@ -115,6 +137,8 @@ export default function App() {
     <div className="harbor-page harbor-page--loading" aria-busy="true" />
   ) : studio.selectedAssetId ? (
     <AssetDetailPage studio={studio} />
+  ) : studio.selectedRepo ? (
+    <RepoDetailPage studio={studio} />
   ) : tab === "discovery" ? (
     <DiscoveryPage
       studio={studio}
@@ -138,16 +162,15 @@ export default function App() {
     />
   ) : tab === "installed" ? (
     <InstalledPage studio={studio} />
+  ) : tab === "activity" ? (
+    <ActivityPage studio={studio} />
   ) : (
     <SettingsPage studio={studio} mode="settings" />
   );
 
   return (
-    <>
-      <AppShell studio={studio} tab={tab} onTab={onTab}>
-        {main}
-      </AppShell>
-      <ActivityLog log={studio.log} logOpen={studio.logOpen} setLogOpen={studio.setLogOpen} />
-    </>
+    <AppShell studio={studio} tab={tab} onTab={onTab}>
+      {main}
+    </AppShell>
   );
 }

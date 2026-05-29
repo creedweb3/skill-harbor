@@ -64,11 +64,11 @@ const PERIOD_LABEL: Record<TrendPeriod, string> = {
 };
 
 const PERIOD_DESC: Record<TrendPeriod, string> = {
-  day: "Top GitHub repos updated in the last 24 hours — ranked by stars.",
-  week: "Top repos updated in the last 7 days — ranked by stars.",
-  month: "Top repos updated in the last 30 days — ranked by stars.",
-  year: "Top repos updated in the last year — ranked by stars.",
-  all: "Highest-star GitHub repos in the registry — one card per repository.",
+  day: "Repos with recent pushes in the last 24h — ranked by activity, community votes, and stars.",
+  week: "Repos active in the last 7 days — ranked by push recency, votes, catalog depth, and stars.",
+  month: "Repos updated in the last 30 days — activity-weighted ranking, not stars alone.",
+  year: "Repos active in the last year — balanced activity, community, and popularity.",
+  all: "All indexed repos — popularity plus recent activity and community votes.",
 };
 
 export type DiscoveryUiConfig = {
@@ -216,7 +216,7 @@ export function buildDiscoverySections(
 ): DiscoverySection[] {
   const lim = discoveryLimits(discoveryUi);
   const repoTrends = assets.length
-    ? buildRepoTrends(assets, trendPeriod, lim.trending)
+    ? buildRepoTrends(assets, trendPeriod, Math.max(lim.trending, 48))
     : [];
   const forYou = assets.length
     ? buildForYouFiles(assets, installedItems, lim.forYou)

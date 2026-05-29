@@ -113,9 +113,87 @@ export function repoAccentHue(sourceRepo: string): number {
 
 function assetInPeriod(asset: Asset, period: TrendPeriod, now: number): boolean {
   if (period === "all") return true;
-  const pushed = asset.repo_pushed_at ? Date.parse(asset.repo_pushed_at) : NaN;
-  if (!Number.isNaN(pushed)) return now - pushed <= PERIOD_MS[period];
-  return (asset.curated_rank ?? 99) <= 5;
+  const raw = asset.repo_pushed_at?.trim();
+  if (!raw) return true;
+  const pushed = Date.parse(raw);
+  if (Number.isNaN(pushed)) return true;
+  return now - pushed <= PERIOD_MS[period];
+}
+
+function groupAssetsByRepo(assets: Asset[], period: TrendPeriod, now: number): Map<string, Asset[]> {
+  const byRepo = new Map<string, Asset[]>();
+  for (const asset of assets) {
+    if (!assetInPeriod(asset, period, now) && period !== "all") continue;
+    const list = byRepo.get(asset.source_repo) ?? [];
+    list.push(asset);
+    byRepo.set(asset.source_repo, list);
+  }
+  return byRepo;
+}
+
+/** 0–1 score: 1 = just pushed, 0 = at or beyond the selected window. */
+function recencyScore(
+  pushedAt: string | undefined,
+  period: TrendPeriod,
+  now: number
+): number {
+  if (!pushedAt) return 0.08;
+  const ts = Date.parse(pushedAt);
+  if (Number.isNaN(ts)) return 0.08;
+  const ageMs = Math.max(0, now - ts);
+  if (period === "all") {
+    const halfLife = 60 * 86400000;
+    return Math.exp(-ageMs / halfLife);
+  }
+  const windowMs = PERIOD_MS[period];
+  if (ageMs >= windowMs) return 0;
+  return 1 - ageMs / windowMs;
+}
+
+/** Shorter windows lean on activity; longer windows allow star weight. */
+function periodStarWeight(period: TrendPeriod): number {
+  switch (period) {
+    case "day":
+      return 0.12;
+    case "week":
+      return 0.22;
+    case "month":
+      return 0.32;
+    case "year":
+      return 0.42;
+    default:
+      return 0.5;
+  }
+}
+
+/**
+ * Composite repo trend score: activity (push recency) + stars + catalog depth + community votes.
+ * Watchers/forks can be wired in when persisted from GitHub repo metadata.
+ */
+export function repoTrendScore(
+  opts: {
+    stars: number;
+    assetCount: number;
+    latestPush?: string;
+    voteTotal: number;
+    period: TrendPeriod;
+    now?: number;
+  }
+): number {
+  const now = opts.now ?? Date.now();
+  const recency = recencyScore(opts.latestPush, opts.period, now);
+  const starScore = Math.log10(Math.max(opts.stars, 1) + 1);
+  const depthScore = Math.log10(Math.max(opts.assetCount, 1) + 1) * 1.5;
+  const voteScore = Math.log10(Math.max(opts.voteTotal, 0) + 1) * 2.5;
+  const starW = periodStarWeight(opts.period);
+  const activityW = Math.max(0.35, 1.05 - starW);
+
+  return (
+    recency * activityW * 12 +
+    starScore * starW * 4 +
+    depthScore * 0.35 +
+    voteScore * 0.6
+  );
 }
 
 export type RepoTrend = {
@@ -124,6 +202,8 @@ export type RepoTrend = {
   assetCount: number;
   representative: Asset;
   latestPush?: string;
+  trendScore: number;
+  voteTotal: number;
 };
 
 export function buildRepoTrends(
@@ -134,22 +214,14 @@ export function buildRepoTrends(
   if (!assets.length) return [];
 
   const now = Date.now();
-  const byRepo = new Map<string, Asset[]>();
+  let byRepo = groupAssetsByRepo(assets, period, now);
 
-  for (const asset of assets) {
-    if (!assetInPeriod(asset, period, now) && period !== "all") continue;
-    const list = byRepo.get(asset.source_repo) ?? [];
-    list.push(asset);
-    byRepo.set(asset.source_repo, list);
+  // Strict period window empty (no recent pushes) — fall back to full catalog, still trend-scored
+  if (byRepo.size === 0 && period !== "all") {
+    byRepo = groupAssetsByRepo(assets, "all", now);
   }
 
-  if (byRepo.size === 0) {
-    for (const asset of assets) {
-      const list = byRepo.get(asset.source_repo) ?? [];
-      list.push(asset);
-      byRepo.set(asset.source_repo, list);
-    }
-  }
+  if (byRepo.size === 0) return [];
 
   return [...byRepo.entries()]
     .map(([source_repo, files]) => {
@@ -160,16 +232,28 @@ export function buildRepoTrends(
         .filter(Boolean)
         .sort()
         .pop();
+      const voteTotal = files.reduce((sum, f) => sum + (f.vote_score ?? 0), 0);
+      const trendScore = repoTrendScore({
+        stars,
+        assetCount: files.length,
+        latestPush,
+        voteTotal,
+        period,
+        now,
+      });
       return {
         source_repo,
         stars,
         assetCount: files.length,
         representative: sorted[0],
         latestPush,
+        voteTotal,
+        trendScore,
       };
     })
     .sort(
       (a, b) =>
+        b.trendScore - a.trendScore ||
         b.stars - a.stars ||
         b.assetCount - a.assetCount ||
         a.source_repo.localeCompare(b.source_repo)
@@ -276,4 +360,38 @@ export function rankFiles(
 
 export function countUniqueRepos(assets: Asset[]): number {
   return new Set(assets.map((a) => a.source_repo)).size;
+}
+
+export function assetsForRepo(assets: Asset[], sourceRepo: string): Asset[] {
+  return assets.filter((a) => a.source_repo === sourceRepo).sort(compareAssets);
+}
+
+export function assetIdsForRepo(assets: Asset[], sourceRepo: string): string[] {
+  return assetsForRepo(assets, sourceRepo).map((a) => a.id);
+}
+
+export function assetIdsForRepos(assets: Asset[], sourceRepos: string[]): string[] {
+  const ids: string[] = [];
+  for (const sourceRepo of sourceRepos) {
+    ids.push(...assetIdsForRepo(assets, sourceRepo));
+  }
+  return ids;
+}
+
+export function isRepoFullySelected(
+  selectedIds: Set<string>,
+  assets: Asset[],
+  sourceRepo: string
+): boolean {
+  const ids = assetIdsForRepo(assets, sourceRepo);
+  return ids.length > 0 && ids.every((id) => selectedIds.has(id));
+}
+
+export function repoTrendFor(
+  assets: Asset[],
+  sourceRepo: string,
+  period: TrendPeriod = "all"
+): RepoTrend | null {
+  const trends = buildRepoTrends(assets, period, assets.length);
+  return trends.find((t) => t.source_repo === sourceRepo) ?? null;
 }

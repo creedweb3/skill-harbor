@@ -23,6 +23,17 @@ import {
   type LeaderboardEntry,
   type LeaderboardsResponse,
 } from "../api";
+import { clearRepoHash, setRepoHash } from "../lib/repoHash";
+import {
+  createConsoleLine,
+  createUserActivity,
+  type ActivityStatus,
+  type ConsoleLine,
+  type UserActivity,
+  canArchiveActivity,
+  isActiveInbox,
+  isUnreadActivity,
+} from "../lib/activityLog";
 import type { InstalledRow } from "../lib/installedGroups";
 
 const DEFAULT_CATS = [
@@ -85,13 +96,14 @@ export function useStudio() {
   const [topPerCategory, setTopPerCategory] = useState(5);
   const [includeDiscovery, setIncludeDiscovery] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
+  const [consoleLog, setConsoleLog] = useState<ConsoleLine[]>([]);
+  const [userActivities, setUserActivities] = useState<UserActivity[]>([]);
+  const currentActivityRef = useRef<string | null>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [hideInstalled, setHideInstalled] = useState(false);
   const [hideIncompatible, setHideIncompatible] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<"setup" | "installed">("setup");
-  const [logOpen, setLogOpen] = useState(true);
   const [leaderboards, setLeaderboards] = useState<LeaderboardsResponse | null>(null);
   const [leaderboardTab, setLeaderboardTab] = useState<LeaderboardTab>("trending");
   const [backendReady, setBackendReady] = useState(false);
@@ -103,6 +115,7 @@ export function useStudio() {
   const [discoverMode, setDiscoverMode] = useState<DiscoverMode>("discovery");
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("week");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [dbStats, setDbStats] = useState<{
     asset_count: number;
     synced_content_count: number;
@@ -111,10 +124,89 @@ export function useStudio() {
     stars_live?: boolean;
   } | null>(null);
 
-  const pushLog = useCallback((line: string, kind: LogKind = "info") => {
-    const prefix = kind === "ok" ? "✓ " : kind === "err" ? "✗ " : "";
-    setLog((prev) => [...prev.slice(-80), `${prefix}${line}`]);
-    setLogOpen(true);
+  const appendConsoleLine = useCallback((line: string, kind: LogKind = "info") => {
+    const entry = createConsoleLine(line, kind);
+    setConsoleLog((prev) => [...prev.slice(-199), entry]);
+    const actId = currentActivityRef.current;
+    if (actId) {
+      setUserActivities((prev) =>
+        prev.map((a) =>
+          a.id === actId ? { ...a, logs: [...a.logs.slice(-99), entry] } : a
+        )
+      );
+    }
+    return entry;
+  }, []);
+
+  const pushLog = appendConsoleLine;
+
+  const beginUserActivity = useCallback((action: string) => {
+    const activity = createUserActivity(action);
+    setUserActivities((prev) => [...prev.slice(-49), activity]);
+    currentActivityRef.current = activity.id;
+    return activity.id;
+  }, []);
+
+  const endUserActivity = useCallback(
+    (id: string, status: ActivityStatus, summary?: string) => {
+      if (currentActivityRef.current === id) currentActivityRef.current = null;
+      setUserActivities((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                status,
+                summary: summary ?? a.summary,
+                finishedAt: Date.now(),
+              }
+            : a
+        )
+      );
+    },
+    []
+  );
+
+  const runUserActivity = useCallback(
+    async (
+      action: string,
+      run: () => Promise<{ summary: string; status?: ActivityStatus } | void>
+    ) => {
+      const id = beginUserActivity(action);
+      try {
+        const result = await run();
+        endUserActivity(id, result?.status ?? "ok", result?.summary ?? action);
+      } catch (e) {
+        pushLog(String(e), "err");
+        endUserActivity(id, "err", String(e));
+      }
+    },
+    [beginUserActivity, endUserActivity, pushLog]
+  );
+
+  const clearConsole = useCallback(() => {
+    setConsoleLog([]);
+  }, []);
+
+  const markActivitiesRead = useCallback((ids?: string[]) => {
+    setUserActivities((prev) =>
+      prev.map((a) => {
+        if (a.archived || a.read) return a;
+        if (ids && !ids.includes(a.id)) return a;
+        return { ...a, read: true };
+      })
+    );
+  }, []);
+
+  const archiveReadActivities = useCallback(() => {
+    setUserActivities((prev) =>
+      prev.map((a) =>
+        canArchiveActivity(a) ? { ...a, archived: true } : a
+      )
+    );
+  }, []);
+
+  const deleteArchivedActivities = useCallback(() => {
+    setUserActivities((prev) => prev.filter((a) => !a.archived));
   }, []);
 
   const applyBootstrap = useCallback((data: Awaited<ReturnType<typeof getBootstrap>>) => {
@@ -364,27 +456,23 @@ export function useStudio() {
 
   const autoDetectPlatform = useCallback(async () => {
     setBusy(true);
-    try {
+    await runUserActivity("Auto-detect platform", async () => {
       const detection = await postAutoDetectPlatform();
       const next = detection.recommended_platform ?? "cursor";
       platformRef.current = next;
       setPlatformState(next);
       setPlatformMode("auto");
-      pushLog(
-        detection.count
-          ? `Auto-detected ${detection.detected[0]?.label ?? next} (${detection.count} agent folder(s) found)`
-          : `No agent folders found — defaulting to ${next}`,
-        "ok"
-      );
+      const msg = detection.count
+        ? `Auto-detected ${detection.detected[0]?.label ?? next} (${detection.count} agent folder(s) found)`
+        : `No agent folders found — defaulting to ${next}`;
+      pushLog(msg, "ok");
       const conn = await getConnection(next);
       setConnection(conn);
-      await loadCatalog();
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setBusy(false);
-    }
-  }, [pushLog, loadCatalog]);
+      await loadCatalog({ silent: true });
+      return { summary: msg, status: "ok" };
+    });
+    setBusy(false);
+  }, [runUserActivity, pushLog, loadCatalog]);
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -409,26 +497,43 @@ export function useStudio() {
 
   const syncRegistry = async (force = false) => {
     setBusy(true);
-    pushLog("Syncing missing content from GitHub (parallel)…");
-    try {
+    await runUserActivity("Sync registry", async () => {
+      pushLog("Syncing missing content from GitHub (parallel)…");
       const result = await postSync(force);
       const skipped = (result as { skipped?: boolean }).skipped;
-      pushLog(
-        skipped
-          ? "Registry already has content — nothing to sync"
-          : `Synced ${result.updated} asset(s)`,
-        "ok"
-      );
+      if (skipped) {
+        pushLog("Registry already has content — nothing to sync", "ok");
+        await loadCatalog({ silent: true });
+        return { summary: "Nothing to sync", status: "ok" };
+      }
+      pushLog(`Synced ${result.updated} asset(s)`, "ok");
       result.errors.slice(0, 5).forEach((e) => pushLog(e, "err"));
-      await loadCatalog();
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setBusy(false);
-    }
+      await loadCatalog({ silent: true });
+      const status: ActivityStatus = result.errors.length ? "err" : "ok";
+      return {
+        summary: `Synced ${result.updated} asset(s)`,
+        status,
+      };
+    });
+    setBusy(false);
   };
 
-  const fetchCatalog = loadCatalog;
+  const fetchCatalog = async () => {
+    setBusy(true);
+    await runUserActivity("Reload catalog", async () => {
+      const result = await hydrateCatalog({ silent: true });
+      if (!result) return { summary: "Reload failed", status: "err" };
+      pushLog(
+        `Loaded ${result.assets.length.toLocaleString()} catalog assets`,
+        "ok"
+      );
+      return {
+        summary: `${result.assets.length.toLocaleString()} assets loaded`,
+        status: "ok",
+      };
+    });
+    setBusy(false);
+  };
 
   const runInstall = async () => {
     const picked = assets.filter((a) => selectedIds.has(a.id));
@@ -437,16 +542,19 @@ export function useStudio() {
       return;
     }
     setBusy(true);
-    pushLog(`Installing ${picked.length} item(s)…`);
-    try {
+    await runUserActivity(`Install ${picked.length} item(s)`, async () => {
       const unsafe = picked.filter((a) => a.safety && !a.safety.safe);
       if (unsafe.length) {
         pushLog(
           `${unsafe.length} item(s) blocked by safety check — open inspector for details`,
           "err"
         );
-        return;
+        return {
+          summary: `${unsafe.length} item(s) blocked by safety check`,
+          status: "err",
+        };
       }
+      pushLog(`Installing ${picked.length} item(s)…`);
       const primary = platformRef.current;
       const also = [...extraInstallPlatforms].filter((p) => p !== primary);
       const targetPlatforms = also.length ? [primary, ...also] : [primary];
@@ -467,18 +575,20 @@ export function useStudio() {
         "ok"
       );
       result.errors.forEach((e) => pushLog(e, "err"));
-      await loadCatalog();
-      await refresh();
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setBusy(false);
-    }
+      await loadCatalog({ silent: true });
+      await refresh({ silent: true });
+      const status: ActivityStatus = result.errors.length ? "err" : "ok";
+      return {
+        summary: `Installed ${result.installed.user?.length ?? 0} global, ${result.installed.project?.length ?? 0} project${platNote}`,
+        status,
+      };
+    });
+    setBusy(false);
   };
 
   const saveSettings = async () => {
     setBusy(true);
-    try {
+    await runUserActivity("Save settings", async () => {
       await patchSettings({
         project_dir: projectDir || undefined,
         default_platform: platformRef.current,
@@ -486,12 +596,10 @@ export function useStudio() {
         extra_install_platforms: [...extraInstallPlatforms],
       });
       pushLog("Settings saved", "ok");
-      await refresh();
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setBusy(false);
-    }
+      await refresh({ silent: true });
+      return { summary: "Settings saved", status: "ok" };
+    });
+    setBusy(false);
   };
 
   const focusLeaderboardEntry = (entry: LeaderboardEntry) => {
@@ -510,19 +618,18 @@ export function useStudio() {
     assetType = "skill"
   ) => {
     if (!confirm(`Remove ${assetType} "${name}" from ${scope}?`)) return;
-    try {
+    await runUserActivity(`Remove ${assetType}`, async () => {
       await removeAsset(assetType, name, scope);
       pushLog(`Removed ${name} (${scope})`, "ok");
-      await refresh();
-      await loadCatalog();
-    } catch (e) {
-      pushLog(String(e), "err");
-    }
+      await refresh({ silent: true });
+      await loadCatalog({ silent: true });
+      return { summary: `Removed ${name} (${scope})`, status: "ok" };
+    });
   };
 
   const runExport = async () => {
     setBusy(true);
-    try {
+    await runUserActivity("Export backup", async () => {
       const bundle = await getExport(true, installProject);
       const blob = new Blob([JSON.stringify(bundle, null, 2)], {
         type: "application/json",
@@ -537,11 +644,9 @@ export function useStudio() {
         (bundle.scopes.user?.skills?.length ?? 0) +
         (bundle.scopes.user?.rules?.length ?? 0);
       pushLog(`Exported backup (${n}+ items)`, "ok");
-    } catch (e) {
-      pushLog(String(e), "err");
-    } finally {
-      setBusy(false);
-    }
+      return { summary: `Exported backup (${n}+ items)`, status: "ok" };
+    });
+    setBusy(false);
   };
 
   const runImport = () => {
@@ -552,7 +657,7 @@ export function useStudio() {
       const file = input.files?.[0];
       if (!file) return;
       setBusy(true);
-      try {
+      await runUserActivity("Import backup", async () => {
         const bundle = JSON.parse(await file.text());
         const result = await postImport({
           bundle,
@@ -564,13 +669,14 @@ export function useStudio() {
           `Imported: ${result.imported.user?.length ?? 0} global, ${result.imported.project?.length ?? 0} project paths`,
           "ok"
         );
-        await refresh();
-        await loadCatalog();
-      } catch (e) {
-        pushLog(String(e), "err");
-      } finally {
-        setBusy(false);
-      }
+        await refresh({ silent: true });
+        await loadCatalog({ silent: true });
+        return {
+          summary: `Imported ${result.imported.user?.length ?? 0} global, ${result.imported.project?.length ?? 0} project paths`,
+          status: "ok",
+        };
+      });
+      setBusy(false);
     };
     input.click();
   };
@@ -705,6 +811,17 @@ export function useStudio() {
     });
   };
 
+  const openRepo = useCallback((sourceRepo: string) => {
+    setSelectedAssetId(null);
+    setSelectedRepo(sourceRepo);
+    setRepoHash(sourceRepo);
+  }, []);
+
+  const closeRepo = useCallback(() => {
+    setSelectedRepo(null);
+    clearRepoHash();
+  }, []);
+
   const installedItems = useMemo(() => {
     const rows: InstalledRow[] = [];
     for (const s of connection?.scopes.user.skills ?? []) {
@@ -769,7 +886,8 @@ export function useStudio() {
     includeDiscovery,
     setIncludeDiscovery,
     busy,
-    log,
+    consoleLog,
+    userActivities,
     search,
     setSearch,
     typeFilter,
@@ -780,8 +898,6 @@ export function useStudio() {
     setHideIncompatible,
     sidebarTab,
     setSidebarTab,
-    logOpen,
-    setLogOpen,
     backendReady,
     catalogReady,
     initOffline,
@@ -815,11 +931,20 @@ export function useStudio() {
     setTrendPeriod,
     selectedAssetId,
     setSelectedAssetId,
+    selectedRepo,
+    setSelectedRepo,
+    openRepo,
+    closeRepo,
     dbStats,
     syncRegistry,
     loadCatalog,
     loadCatalogPage,
     pushLog,
+    runUserActivity,
+    markActivitiesRead,
+    archiveReadActivities,
+    deleteArchivedActivities,
+    clearConsole,
     setBusy,
     toggleSelectAllVisible,
     toggleSelectAllForIds,

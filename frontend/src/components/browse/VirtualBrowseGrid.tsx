@@ -108,8 +108,8 @@ export function VirtualBrowseGrid({
               width: "100%",
               height: rowHeight,
               transform: `translateY(${virtualRow.start}px)`,
-              display: "flex",
-              flexWrap: "nowrap",
+              display: "grid",
+              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
               gap: "0.75rem",
             }}
           >

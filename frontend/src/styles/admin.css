@@ -848,28 +848,10 @@ html:has(.admin-shell) body {
   opacity: 0.55;
 }
 
-/* Claude-style thin scrollbars */
+/* Scrollbars — themed globally in styles/global.css */
 .harbor-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(168, 162, 158, 0.35) transparent;
-}
-
-.harbor-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.harbor-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.harbor-scroll::-webkit-scrollbar-thumb {
-  background: rgba(168, 162, 158, 0.32);
-  border-radius: 999px;
-}
-
-.harbor-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(168, 162, 158, 0.5);
+  scrollbar-color: var(--harbor-scrollbar-thumb) var(--harbor-scrollbar-track);
 }
 
 .admin-input,

@@ -1,11 +1,11 @@
 import type { TrendPeriod } from "../../hooks/useStudio";
 
 const PERIODS: { id: TrendPeriod; label: string; hint: string }[] = [
-  { id: "day", label: "24h", hint: "Recently updated repos" },
-  { id: "week", label: "7d", hint: "Past week" },
-  { id: "month", label: "30d", hint: "Past month" },
-  { id: "year", label: "1y", hint: "Past year" },
-  { id: "all", label: "All time", hint: "Top by GitHub stars" },
+  { id: "day", label: "24h", hint: "Recent pushes · activity-weighted" },
+  { id: "week", label: "7d", hint: "Past week · activity + votes + stars" },
+  { id: "month", label: "30d", hint: "Past month · balanced trend score" },
+  { id: "year", label: "1y", hint: "Past year · activity + popularity" },
+  { id: "all", label: "All time", hint: "Full registry · popularity + recency" },
 ];
 
 type Props = {

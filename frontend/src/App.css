@@ -43,9 +43,16 @@
   box-sizing: border-box;
 }
 
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
   background:
     radial-gradient(ellipse 90% 50% at 50% -10%, rgba(217, 119, 87, 0.07), transparent 55%),
     radial-gradient(ellipse 60% 40% at 100% 50%, rgba(168, 162, 158, 0.04), transparent),
@@ -53,7 +60,8 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 .mono {
@@ -1169,69 +1177,6 @@ input[type="checkbox"] {
   color: var(--text-secondary);
 }
 
-/* Activity log */
-.activity-log {
-  flex-shrink: 0;
-  margin: 0 1.75rem 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.activity-log-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1rem;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 0.8125rem;
-  font-weight: 550;
-  cursor: pointer;
-  text-align: left;
-}
-
-.activity-log-toggle:hover {
-  background: var(--surface-hover);
-}
-
-.activity-count {
-  font-size: 0.625rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: var(--radius-full);
-  background: var(--accent-soft);
-  color: var(--accent-hover);
-}
-
-.activity-chevron {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.activity-log-body {
-  padding: 0.75rem 1rem;
-  max-height: 140px;
-  overflow-y: auto;
-  border-top: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--muted);
-  line-height: 1.6;
-}
-
-.activity-log-body .ok {
-  color: var(--ok);
-}
-
-.activity-log-body .err {
-  color: var(--danger);
-}
-
 /* Mode switch */
 .mode-switch {
   display: flex;
@@ -1744,26 +1689,4 @@ input[type="checkbox"] {
   padding-top: 0;
 }
 
-/* Scrollbars */
-.sidebar-panel::-webkit-scrollbar,
-.discovery-dashboard::-webkit-scrollbar,
-.custom-search .catalog::-webkit-scrollbar,
-.filter-drawer-body::-webkit-scrollbar,
-.activity-log-body::-webkit-scrollbar,
-.installed-list::-webkit-scrollbar,
-.spotlight-body::-webkit-scrollbar,
-.installed-sections::-webkit-scrollbar {
-  width: 6px;
-}
-
-.sidebar-panel::-webkit-scrollbar-thumb,
-.discovery-dashboard::-webkit-scrollbar-thumb,
-.custom-search .catalog::-webkit-scrollbar-thumb,
-.filter-drawer-body::-webkit-scrollbar-thumb,
-.activity-log-body::-webkit-scrollbar-thumb,
-.installed-list::-webkit-scrollbar-thumb,
-.spotlight-body::-webkit-scrollbar-thumb,
-.installed-sections::-webkit-scrollbar-thumb {
-  background: var(--surface-raised);
-  border-radius: var(--radius-full);
-}
+/* Scrollbars — themed globally in styles/global.css */

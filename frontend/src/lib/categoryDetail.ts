@@ -8,7 +8,7 @@ import {
   repoShortName,
 } from "./ranking";
 
-export type DiscoverySectionKind = "trending" | "for_you" | "profession";
+export type DiscoverySectionKind = "trending" | "for_you" | "profession" | "repos";
 
 export type DiscoverySectionView = {
   kind: DiscoverySectionKind;
@@ -25,6 +25,15 @@ export function domainViewForProfession(p: DiscoveryProfession): DiscoverySectio
     label: p.label,
     description: `All skills ranked in ${p.label}.`,
     domain: p.domain,
+  };
+}
+
+export function reposListView(): DiscoverySectionView {
+  return {
+    kind: "repos",
+    id: "repos-all",
+    label: "All ranked repositories",
+    description: "Browse every indexed GitHub repo and open one to see its skills, rules, and commands.",
   };
 }
 
@@ -164,7 +173,7 @@ export function sortCategoryAssets(list: Asset[], sort: CategorySortKey): Asset[
 
 export function defaultSortForSection(kind: DiscoverySectionKind): CategorySortKey {
   if (kind === "for_you") return "quality";
-  if (kind === "trending") return "stars";
+  if (kind === "trending" || kind === "repos") return "stars";
   return "rank";
 }
 
@@ -241,8 +250,9 @@ export function sectionViewFromSection(
     return {
       kind: "trending",
       id: section.id,
-      label: section.label,
-      description: section.description,
+      label: "All ranked skills & rules",
+      description:
+        "Browse the full catalog — sort by stars, votes, quality, or recency. Repos have their own page.",
     };
   }
   if (section.kind === "for_you") {

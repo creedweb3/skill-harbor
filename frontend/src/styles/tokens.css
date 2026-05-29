@@ -35,6 +35,34 @@
   --harbor-radius-lg: 16px;
   --harbor-radius-full: 999px;
   --harbor-nav-w: 252px;
+  --harbor-nav-w-collapsed: 3.5rem;
+  --harbor-nav-current-w: var(--harbor-nav-w);
   --harbor-top-h: 58px;
   --harbor-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --harbor-scrollbar-size: 8px;
+  --harbor-scrollbar-thumb: rgba(168, 162, 158, 0.32);
+  --harbor-scrollbar-thumb-hover: rgba(168, 162, 158, 0.52);
+  --harbor-scrollbar-track: transparent;
+  --harbor-type-label: var(--harbor-mono);
+  --harbor-type-ui: var(--harbor-font);
+  --harbor-type-data: var(--harbor-mono);
+  /* Shared chrome: outline controls, menus, meta */
+  --harbor-chrome-border: var(--harbor-border-strong);
+  --harbor-chrome-border-hover: rgba(231, 229, 228, 0.2);
+  --harbor-chrome-bg: transparent;
+  --harbor-chrome-radius: calc(var(--harbor-radius) - 2px);
+  --harbor-chrome-focus-border: rgba(217, 119, 87, 0.45);
+  --harbor-chrome-focus-ring: 0 0 0 3px rgba(217, 119, 87, 0.1);
+  --harbor-chrome-padding-y: 0.48rem;
+  --harbor-chrome-padding-x: 0.7rem;
+  --harbor-chrome-height: 3rem;
+  --harbor-menu-bg: var(--harbor-bg-elevated);
+  --harbor-menu-border: var(--harbor-border-strong);
+  --harbor-menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --harbor-meta-size: 0.6875rem;
+  --harbor-meta-tracking: 0.04em;
+}
+
+html.harbor-nav-collapsed {
+  --harbor-nav-current-w: var(--harbor-nav-w-collapsed);
 }

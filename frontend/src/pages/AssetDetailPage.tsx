@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getAssetDetail, postVote, type Asset } from "../api";
 import type { Studio } from "../hooks/useStudio";
 import { formatStars } from "../lib/format";
+import { assetBrowseUrl, repoBrowseUrlFromAssets } from "../lib/githubUrls";
 import { assetTypeBadgeClass } from "../lib/assetType";
 import { getVoterId } from "../lib/voter";
 
@@ -11,6 +12,8 @@ export function AssetDetailPage({ studio }: Props) {
   const {
     selectedAssetId,
     setSelectedAssetId,
+    selectedRepo,
+    openRepo,
     selectedIds,
     toggleRow,
     runInstall,
@@ -61,6 +64,13 @@ export function AssetDetailPage({ studio }: Props) {
   const content = asset?.content || asset?.content_preview || "";
   const selected = asset ? selectedIds.has(asset.id) : false;
   const typeLabel = asset?.asset_type_label ?? "Skill";
+  const repoGitHubUrl = asset
+    ? repoBrowseUrlFromAssets(
+        assets.filter((a) => a.source_repo === asset.source_repo).length
+          ? assets.filter((a) => a.source_repo === asset.source_repo)
+          : [asset]
+      ) ?? assetBrowseUrl(asset)
+    : null;
 
   return (
     <div className="asset-detail-page">
@@ -68,9 +78,11 @@ export function AssetDetailPage({ studio }: Props) {
         <button
           type="button"
           className="harbor-btn harbor-btn--ghost asset-detail-back"
-          onClick={() => setSelectedAssetId(null)}
+          onClick={() => {
+            setSelectedAssetId(null);
+          }}
         >
-          ← Back
+          ← {selectedRepo ? "Back to repo" : "Back"}
         </button>
         <div className="asset-detail-title-block">
           <span className={assetTypeBadgeClass(asset?.asset_type ?? "skill")}>{typeLabel}</span>
@@ -137,15 +149,27 @@ export function AssetDetailPage({ studio }: Props) {
               Open on GitHub
             </a>
           ) : null}
-          {asset?.github_repo_url ? (
+          {repoGitHubUrl ? (
             <a
-              href={asset.github_repo_url}
+              href={repoGitHubUrl}
               target="_blank"
               rel="noreferrer"
               className="harbor-btn harbor-btn--ghost"
             >
               View repository
             </a>
+          ) : null}
+          {asset?.source_repo && asset.source_repo !== selectedRepo ? (
+            <button
+              type="button"
+              className="harbor-btn harbor-btn--ghost"
+              onClick={() => {
+                setSelectedAssetId(null);
+                openRepo(asset.source_repo);
+              }}
+            >
+              Browse repo skills
+            </button>
           ) : null}
         </div>
       </header>

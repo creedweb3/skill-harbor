@@ -8,9 +8,7 @@ type Props = {
   className?: string;
 };
 
-/**
- * Discovery section controls — flat Claude-style row (no boxed toolbar).
- */
+/** Discovery section controls — compact inline row (same on home + detail). */
 export function SectionBar({ start, end, meta, sticky = false, className = "" }: Props) {
   return (
     <div
