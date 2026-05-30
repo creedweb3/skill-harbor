@@ -124,11 +124,20 @@ def classify_candidate_path(path: str) -> str | None:
     return None
 
 
-def path_quality_key(path: str) -> tuple[int, int, str]:
-    """Lower is better when picking one row among identical content hashes."""
+def path_quality_key(path: str) -> tuple[int, int, int, str]:
+    """Lower is better when picking one row among duplicates."""
     norm = path or ""
     if is_blocked_path(norm):
-        return (2, len(norm), norm)
-    if path_in_skill_dir(norm):
-        return (0, len(norm), norm)
-    return (1, len(norm), norm)
+        return (3, 999, len(norm), norm)
+    ranked = normalize_repo_path(norm)
+    preferred_markers = SKILL_DIR_MARKERS + (
+        "/.agents/skills/",
+        "/.kiro/skills/",
+    )
+    for i, marker in enumerate(preferred_markers):
+        if marker in ranked:
+            return (0, i, len(norm), norm)
+    lower = norm.replace("\\", "/").lower()
+    if lower.endswith("/skill.md") or lower.endswith("skill.md"):
+        return (1, 0, len(norm), norm)
+    return (2, 0, len(norm), norm)

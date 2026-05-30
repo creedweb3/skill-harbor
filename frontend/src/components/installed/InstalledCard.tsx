@@ -1,55 +1,88 @@
+import type { KeyboardEvent, MouseEvent } from "react";
+import type { Asset } from "../../api";
+import { AssetRankCard } from "../dashboard/AssetRankCard";
+
 type Props = {
-  name: string;
-  assetType?: string;
+  asset: Asset;
+  selected?: boolean;
+  openable?: boolean;
+  checked?: boolean;
+  onToggleCheck?: () => void;
   updateAvailable?: boolean;
-  updateTitle?: string;
+  onOpen?: () => void;
   onRemove: () => void;
   onUpdate?: () => void;
 };
 
-import { assetTypeBadgeClass } from "../../lib/assetType";
-
-const TYPE_LABELS: Record<string, string> = {
-  skill: "Skill",
-  rule: "Rule",
-  command: "Cmd",
-  agent: "Agent",
-};
-
 export function InstalledCard({
-  name,
-  assetType = "skill",
+  asset,
+  selected = false,
+  openable = false,
+  checked = false,
+  onToggleCheck,
   updateAvailable = false,
-  updateTitle,
+  onOpen,
   onRemove,
   onUpdate,
 }: Props) {
+  const canOpen = openable && Boolean(onOpen);
+
+  const stopCardNav = (e: MouseEvent | KeyboardEvent) => {
+    e.stopPropagation();
+  };
+
   return (
-    <article className={`installed-card ${updateAvailable ? "installed-card--update" : ""}`}>
-      <div className="installed-card__body">
-        <span className={`${assetTypeBadgeClass(assetType)} installed-card__type`}>
-          {TYPE_LABELS[assetType] ?? assetType}
+    <div
+      className={[
+        "installed-card-wrap",
+        updateAvailable ? "installed-card-wrap--update" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {updateAvailable ? (
+        <span className="installed-card__update-badge installed-card__update-badge--float">
+          Update available
         </span>
-        {updateAvailable ? (
-          <span className="installed-card__update-badge">Update available</span>
-        ) : null}
-        <p className="installed-card__name" title={updateTitle ?? name}>
-          {name}
-        </p>
-        {updateTitle && updateTitle !== name ? (
-          <p className="installed-card__update-from muted">Registry: {updateTitle}</p>
-        ) : null}
-      </div>
-      <div className="installed-card__actions">
-        {updateAvailable && onUpdate ? (
-          <button type="button" className="installed-card__update" onClick={onUpdate}>
-            Update
-          </button>
-        ) : null}
-        <button type="button" className="installed-card__remove" onClick={onRemove}>
-          Remove
-        </button>
-      </div>
-    </article>
+      ) : null}
+      <AssetRankCard
+        asset={asset}
+        selected={selected}
+        clickable={canOpen}
+        checked={checked}
+        onToggleCheck={onToggleCheck}
+        onSelect={onOpen ?? (() => {})}
+        footer={
+          <>
+            {!asset.source_repo ? (
+              <p className="asset-card-foot installed-card__local-foot">Installed locally</p>
+            ) : null}
+            <div
+              className="installed-card__actions"
+              onClick={stopCardNav}
+              onKeyDown={stopCardNav}
+              role="presentation"
+            >
+              {updateAvailable && onUpdate ? (
+                <button
+                  type="button"
+                  className="harbor-text-action harbor-text-action--accent installed-card__action"
+                  onClick={onUpdate}
+                >
+                  Update
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="harbor-text-action installed-card__action"
+                onClick={onRemove}
+              >
+                Remove
+              </button>
+            </div>
+          </>
+        }
+      />
+    </div>
   );
 }

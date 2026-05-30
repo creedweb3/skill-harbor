@@ -328,11 +328,11 @@ export function pickDiverseFiles(assets: Asset[], opts: PickFilesOptions): Asset
     }
   }
 
-  return dedupePickedAssets(out);
+  return dedupeDisplayAssets(out);
 }
 
 /** Drop duplicate ids / same repo+install / same display title in one list. */
-function dedupePickedAssets(assets: Asset[]): Asset[] {
+export function dedupeDisplayAssets(assets: Asset[]): Asset[] {
   const seenId = new Set<string>();
   const seenInstall = new Set<string>();
   const seenTitle = new Set<string>();
@@ -363,7 +363,9 @@ export function countUniqueRepos(assets: Asset[]): number {
 }
 
 export function assetsForRepo(assets: Asset[], sourceRepo: string): Asset[] {
-  return assets.filter((a) => a.source_repo === sourceRepo).sort(compareAssets);
+  return dedupeDisplayAssets(
+    assets.filter((a) => a.source_repo === sourceRepo).sort(compareAssets)
+  );
 }
 
 export function assetIdsForRepo(assets: Asset[], sourceRepo: string): string[] {

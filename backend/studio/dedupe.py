@@ -6,6 +6,7 @@ and prefers allowlisted skill-directory paths when merging identical content.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from studio.database import get_connection
@@ -20,16 +21,18 @@ def _should_skip_path(path: str) -> bool:
 
 
 def dedupe_registry(*, fix_names: bool = True) -> dict[str, Any]:
-    """Drop junk paths, identical content, and refresh install/title from paths."""
+    """Drop junk paths, identical content, mirrored skill folders, and refresh names."""
     removed_templates = _remove_junk_paths()
     removed_content = _dedupe_by_content_hash()
     renamed = _fix_display_names() if fix_names else 0
     removed_install = _dedupe_by_install_name()
+    removed_skill_mirrors = _dedupe_by_skill_leaf()
     return {
         "removed_templates": removed_templates,
         "removed_content_dupes": removed_content,
         "renamed": renamed,
         "removed_install_collisions": removed_install,
+        "removed_skill_mirrors": removed_skill_mirrors,
     }
 
 
@@ -61,6 +64,44 @@ def _pick_keep_id(rows: list) -> str:
             best_key = key
             best_id = row["id"]
     return best_id
+
+
+def _skill_leaf_name(path: str) -> str | None:
+    p = Path(path.replace("\\", "/"))
+    if p.name.lower() != "skill.md":
+        return None
+    parent = p.parent.name.strip()
+    return parent.lower() if parent else None
+
+
+def _dedupe_by_skill_leaf() -> int:
+    """Same repo + skill folder (e.g. api-design/SKILL.md): keep the best path."""
+    removed = 0
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, path, stars, source_type, source_repo
+            FROM assets WHERE asset_type = 'skill'
+            """
+        ).fetchall()
+        groups: dict[tuple[str, str], list] = {}
+        for row in rows:
+            leaf = _skill_leaf_name(row["path"])
+            if not leaf:
+                continue
+            key = (row["source_repo"], leaf)
+            groups.setdefault(key, []).append(row)
+
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            keep_id = _pick_keep_id(group)
+            for row in group:
+                if row["id"] != keep_id:
+                    conn.execute("DELETE FROM assets WHERE id = ?", (row["id"],))
+                    removed += 1
+        conn.commit()
+    return removed
 
 
 def _dedupe_by_content_hash() -> int:

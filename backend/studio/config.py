@@ -31,6 +31,10 @@ def save_config(data: dict[str, Any]) -> None:
 
 
 def get_project_dir() -> Path:
+    if get_project_dir_mode() == "auto":
+        from studio.project_detect import detect_project_dir
+
+        return Path(detect_project_dir()["project_dir"]).resolve()
     cfg = load_config()
     raw = cfg.get("project_dir")
     if raw:
@@ -38,6 +42,24 @@ def get_project_dir() -> Path:
         if p.is_dir():
             return p.resolve()
     return default_project_dir().resolve()
+
+
+def get_project_dir_mode() -> str:
+    cfg = load_config()
+    mode = cfg.get("project_dir_mode")
+    if mode in ("auto", "manual"):
+        return mode
+    if cfg.get("project_dir"):
+        return "manual"
+    return "auto"
+
+
+def set_project_dir_mode(mode: str) -> str:
+    m = mode if mode in ("auto", "manual") else "auto"
+    cfg = load_config()
+    cfg["project_dir_mode"] = m
+    save_config(cfg)
+    return m
 
 
 def set_project_dir(path: Path) -> Path:

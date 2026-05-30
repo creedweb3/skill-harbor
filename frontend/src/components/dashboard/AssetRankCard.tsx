@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { Asset } from "../../api";
 import { formatStars } from "../../lib/format";
 import { assetTypeBadgeClass, formatSourceRepo } from "../../lib/assetType";
@@ -12,6 +12,8 @@ type Props = {
   rank?: number;
   checked?: boolean;
   onToggleCheck?: () => void;
+  clickable?: boolean;
+  footer?: ReactNode;
 };
 
 export const AssetRankCard = memo(function AssetRankCard({
@@ -21,6 +23,8 @@ export const AssetRankCard = memo(function AssetRankCard({
   rank,
   checked = false,
   onToggleCheck,
+  clickable = true,
+  footer,
 }: Props) {
   const title = assetDisplayTitle(asset);
   const hasContent = Boolean(asset.content || asset.content_preview);
@@ -30,17 +34,18 @@ export const AssetRankCard = memo(function AssetRankCard({
   return (
     <article
       className={[
-        "harbor-card harbor-card--clickable harbor-card--default",
+        "harbor-card harbor-card--default",
+        clickable ? "harbor-card--clickable" : "",
         selected ? "selected" : "",
         selectable ? "harbor-card--selectable" : "",
         checked ? "harbor-card--checked" : "",
       ]
         .filter(Boolean)
         .join(" ")}
-      onClick={onSelect}
-      onKeyDown={(e) => e.key === "Enter" && onSelect()}
-      role="button"
-      tabIndex={0}
+      onClick={clickable ? onSelect : undefined}
+      onKeyDown={clickable ? (e) => e.key === "Enter" && onSelect() : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
     >
       {selectable ? (
         <CardSelectToggle checked={checked} label={title} onToggle={() => onToggleCheck?.()} />
@@ -54,15 +59,18 @@ export const AssetRankCard = memo(function AssetRankCard({
           <span className="asset-card-votes">▲ {asset.vote_score}</span>
         ) : null}
       </div>
-      <p className="asset-card-source" title={asset.source_repo}>
-        <span className="asset-card-source__label">Source</span>
-        <span className="asset-card-source__repo">
-          <span className="asset-card-source__owner">{owner}</span>
-          <span className="asset-card-source__sep">/</span>
-          <span>{repoName}</span>
-        </span>
-      </p>
+      {asset.source_repo ? (
+        <p className="asset-card-source" title={asset.source_repo}>
+          <span className="asset-card-source__label">Source</span>
+          <span className="asset-card-source__repo">
+            <span className="asset-card-source__owner">{owner}</span>
+            <span className="asset-card-source__sep">/</span>
+            <span>{repoName}</span>
+          </span>
+        </p>
+      ) : null}
       {!hasContent ? <span className="asset-card-warn">Sync for content</span> : null}
+      {footer}
     </article>
   );
 });

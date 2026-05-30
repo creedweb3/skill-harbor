@@ -1,5 +1,6 @@
 import type { Studio } from "../../hooks/useStudio";
 import { PlatformSelector } from "../platform/PlatformSelector";
+import { SettingsModeSwitch } from "../settings/SettingsModeSwitch";
 import { Button } from "../ui/Button";
 import { Field, TextInput } from "../ui/Field";
 
@@ -11,39 +12,70 @@ export function SetupPanel({ studio }: Props) {
     platforms,
     platform,
     platformMode,
+    setPlatformMode,
     setPlatform,
     autoDetectPlatform,
-    busy,
     projectDir,
     setProjectDir,
+    projectDirMode,
+    setProjectDirMode,
+    autoDetectProject,
+    busy,
     saveSettings,
     dbStats,
   } = studio;
+
+  const platformLabel = platforms.find((p) => p.id === platform)?.label ?? platform;
+
+  const handlePlatformMode = (mode: "auto" | "manual") => {
+    if (mode === platformMode) return;
+    if (mode === "auto") {
+      void autoDetectPlatform();
+      return;
+    }
+    setPlatformMode("manual");
+    void setPlatform(platform, { manual: true });
+  };
+
+  const handleProjectMode = (mode: "auto" | "manual") => {
+    if (mode === projectDirMode) return;
+    if (mode === "auto") {
+      void autoDetectProject();
+      return;
+    }
+    setProjectDirMode("manual");
+  };
 
   return (
     <div className="sidebar-panel">
       <section className="sidebar-section" aria-labelledby="platform-heading">
         <h2 id="platform-heading">Agent platform</h2>
+        <SettingsModeSwitch
+          ariaLabel="Platform selection mode"
+          value={platformMode}
+          onChange={handlePlatformMode}
+          disabled={busy}
+        />
         {platformMode === "auto" ? (
-          <p className="hint">
-            Mode: <strong>Auto-detect</strong> — using{" "}
-            {platforms.find((p) => p.id === platform)?.label ?? platform}
-          </p>
+          <>
+            <p className="hint">
+              Using <strong>{platformLabel}</strong> — detected from agent folders on this machine.
+            </p>
+            <Button variant="ghost" full onClick={() => void autoDetectPlatform()} disabled={busy}>
+              Re-detect platform
+            </Button>
+          </>
         ) : (
-          <PlatformSelector
-            platforms={platforms}
-            value={platform}
-            onChange={(id) => setPlatform(id, { manual: true })}
-            disabled={busy}
-          />
+          <>
+            <PlatformSelector
+              platforms={platforms}
+              value={platform}
+              onChange={(id) => setPlatform(id, { manual: true })}
+              disabled={busy}
+            />
+            <p className="hint">Pick a platform manually. Installs target this agent until you switch back.</p>
+          </>
         )}
-        <Button variant="ghost" full onClick={() => void autoDetectPlatform()} disabled={busy}>
-          Auto-detect platform
-        </Button>
-        <p className="hint">
-          Scans ~/.cursor, ~/.claude, ~/.codex, and project agent folders. Manual pick overrides
-          until you click Auto-detect again.
-        </p>
       </section>
 
       <section className="sidebar-section" aria-labelledby="conn-heading">
@@ -98,17 +130,38 @@ export function SetupPanel({ studio }: Props) {
 
       <section className="sidebar-section" aria-labelledby="settings-heading">
         <h2 id="settings-heading">Project</h2>
-        <Field label="Project directory">
-          <TextInput
-            type="text"
-            value={projectDir}
-            onChange={(e) => setProjectDir(e.target.value)}
-            placeholder="C:\path\to\repo"
-          />
-        </Field>
-        <Button variant="ghost" full onClick={saveSettings} disabled={busy}>
-          Save project path
-        </Button>
+        <SettingsModeSwitch
+          ariaLabel="Project directory mode"
+          value={projectDirMode}
+          onChange={handleProjectMode}
+          disabled={busy}
+        />
+        {projectDirMode === "auto" ? (
+          <>
+            <p className="hint">
+              Using <code className="mono">{projectDir || "—"}</code> — detected from git root or agent
+              folders.
+            </p>
+            <Button variant="ghost" full onClick={() => void autoDetectProject()} disabled={busy}>
+              Re-detect project
+            </Button>
+          </>
+        ) : (
+          <>
+            <Field label="Project directory">
+              <TextInput
+                type="text"
+                value={projectDir}
+                onChange={(e) => setProjectDir(e.target.value)}
+                placeholder="C:\path\to\repo"
+              />
+            </Field>
+            <Button variant="ghost" full onClick={saveSettings} disabled={busy}>
+              Save project path
+            </Button>
+            <p className="hint">Custom path for project-scoped installs (.cursor, .claude, etc.).</p>
+          </>
+        )}
       </section>
     </div>
   );

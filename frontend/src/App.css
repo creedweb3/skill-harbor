@@ -227,6 +227,10 @@ body {
   font-weight: 550;
 }
 
+.settings-mode-switch {
+  align-self: flex-start;
+}
+
 .sidebar-section-head {
   display: flex;
   align-items: center;

@@ -134,6 +134,7 @@ def _maybe_refresh_stars_background() -> None:
 
 class SettingsUpdate(BaseModel):
     project_dir: str | None = None
+    project_dir_mode: str | None = Field(default=None, pattern="^(auto|manual)$")
     default_platform: str | None = None
     platform_mode: str | None = Field(default=None, pattern="^(auto|manual)$")
     extra_install_platforms: list[str] | None = None
@@ -235,6 +236,8 @@ def get_settings() -> dict[str, Any]:
     last = stats.get("last_sync") or {}
     return {
         "project_dir": str(project),
+        "project_dir_mode": config.get_project_dir_mode(),
+        "project_auto_detect": config.get_project_dir_mode() == "auto",
         "min_repo_stars": get_min_repo_stars(),
         "config_path": str(config.CONFIG_PATH),
         "db_path": str(get_db_path()),
@@ -258,6 +261,8 @@ def get_settings() -> dict[str, Any]:
 def patch_settings(body: SettingsUpdate) -> dict[str, Any]:
     if body.project_dir is not None:
         config.set_project_dir(Path(body.project_dir))
+    if body.project_dir_mode is not None:
+        config.set_project_dir_mode(body.project_dir_mode)
     if body.default_platform is not None:
         config.set_default_platform(body.default_platform)
     if body.platform_mode is not None:
@@ -453,6 +458,15 @@ def installed_updates(platform: str | None = None) -> dict[str, Any]:
     return {"updates": items, "count": len(items), "platform": platform_id}
 
 
+@app.get("/api/installed/matches")
+def installed_matches(platform: str | None = None) -> dict[str, Any]:
+    from studio.installed_updates import list_installed_registry_matches
+
+    platform_id = platform or config.get_default_platform()
+    items = list_installed_registry_matches(config.get_project_dir(), platform_id)
+    return {"matches": items, "count": len(items), "platform": platform_id}
+
+
 @app.get("/api/platforms")
 def list_platforms(include_planned: bool = True) -> dict[str, Any]:
     specs = platforms.list_platforms(include_planned=include_planned)
@@ -462,6 +476,20 @@ def list_platforms(include_planned: bool = True) -> dict[str, Any]:
         "default_platform": config.get_default_platform(),
         "platform_mode": config.get_platform_mode(),
         "active_platform": config.resolve_active_platform(project),
+    }
+
+
+@app.post("/api/project/auto-detect")
+def apply_auto_detect_project() -> dict[str, Any]:
+    from studio.project_detect import detect_project_dir
+
+    detection = detect_project_dir()
+    config.set_project_dir_mode("auto")
+    project = config.get_project_dir()
+    return {
+        **detection,
+        "project_dir_mode": "auto",
+        "project_dir": str(project),
     }
 
 
@@ -544,6 +572,8 @@ def api_bootstrap(platform: str | None = None) -> dict[str, Any]:
     return {
         "settings": {
             "project_dir": str(project),
+            "project_dir_mode": config.get_project_dir_mode(),
+            "project_auto_detect": config.get_project_dir_mode() == "auto",
             "default_platform": config.get_default_platform(),
             "platform_mode": config.get_platform_mode(),
             "extra_install_platforms": config.get_extra_install_platforms(),

@@ -111,6 +111,16 @@ export type InstalledUpdate = {
   stars: number;
 };
 
+export type InstalledRegistryMatch = {
+  name: string;
+  scope: "user" | "project";
+  asset_type: string;
+  registry_asset_id: string;
+  registry_title: string;
+  source_repo: string;
+  stars: number;
+};
+
 export type ScopeInfo = {
   exists: boolean;
   skills: { name: string; path: string }[];
@@ -244,6 +254,8 @@ export const getSettings = () =>
     min_repo_stars: number;
     default_platform?: string;
     platform_mode?: "auto" | "manual";
+    project_dir_mode?: "auto" | "manual";
+    project_auto_detect?: boolean;
     extra_install_platforms?: string[];
     active_platform?: string;
     platform_auto_detect?: boolean;
@@ -291,6 +303,8 @@ export type DiscoveryBootstrap = {
 export type BootstrapResponse = {
   settings: {
     project_dir: string;
+    project_dir_mode?: "auto" | "manual";
+    project_auto_detect?: boolean;
     default_platform: string;
     platform_mode: "auto" | "manual";
     extra_install_platforms: string[];
@@ -318,6 +332,16 @@ export const getPlatformDetect = () => api<PlatformDetection>("/api/platforms/de
 
 export const postAutoDetectPlatform = () =>
   api<PlatformDetection>("/api/platforms/auto-detect", { method: "POST" });
+
+export type ProjectDetection = {
+  project_dir: string;
+  method: string;
+  cwd: string;
+  project_dir_mode?: "auto" | "manual";
+};
+
+export const postAutoDetectProject = () =>
+  api<ProjectDetection>("/api/project/auto-detect", { method: "POST" });
 
 export type CatalogResponse = {
   assets: Asset[];
@@ -644,6 +668,7 @@ export const getSyncStatus = () =>
 
 export const patchSettings = (body: {
   project_dir?: string;
+  project_dir_mode?: "auto" | "manual";
   default_platform?: string;
   platform_mode?: "auto" | "manual";
   extra_install_platforms?: string[];
@@ -657,6 +682,9 @@ export const getConnection = (platform?: string) => {
 
 export const getInstalledUpdates = () =>
   api<{ updates: InstalledUpdate[]; count: number }>("/api/installed/updates");
+
+export const getInstalledMatches = () =>
+  api<{ matches: InstalledRegistryMatch[]; count: number }>("/api/installed/matches");
 
 export const postAdminRegistryEvolve = (force = false) =>
   jobPost(`/api/admin/registry/evolve${force ? "?force=true" : ""}`);

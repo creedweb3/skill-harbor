@@ -13,6 +13,7 @@ import {
   getLeaderboards,
   getPlatforms,
   postAutoDetectPlatform,
+  postAutoDetectProject,
   patchSettings,
   type PlatformInfo,
   postImport,
@@ -83,6 +84,7 @@ export function useStudio() {
   const catalogFullyLoadedRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [projectDir, setProjectDir] = useState("");
+  const [projectDirMode, setProjectDirMode] = useState<"auto" | "manual">("auto");
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
   const [platform, setPlatformState] = useState("cursor");
   const [platformMode, setPlatformMode] = useState<"auto" | "manual">("auto");
@@ -215,6 +217,7 @@ export function useStudio() {
     platformRef.current = active;
     setPlatformState(active);
     setPlatformMode(s.platform_mode ?? "auto");
+    setProjectDirMode(s.project_dir_mode ?? (s.project_auto_detect === false ? "manual" : "auto"));
     setExtraInstallPlatforms(new Set(s.extra_install_platforms ?? []));
     setProjectDir(s.project_dir);
     setDbStats({
@@ -474,6 +477,28 @@ export function useStudio() {
     setBusy(false);
   }, [runUserActivity, pushLog, loadCatalog]);
 
+  const autoDetectProject = useCallback(async () => {
+    setBusy(true);
+    await runUserActivity("Auto-detect project", async () => {
+      const detection = await postAutoDetectProject();
+      setProjectDirMode("auto");
+      setProjectDir(detection.project_dir);
+      const method =
+        detection.method === "git"
+          ? "git repository root"
+          : detection.method === "cwd"
+            ? "current working directory"
+            : `${detection.method} folder`;
+      const msg = `Using ${detection.project_dir} (${method})`;
+      pushLog(msg, "ok");
+      const conn = await getConnection(platformRef.current);
+      setConnection(conn);
+      await refresh({ silent: true });
+      return { summary: msg, status: "ok" };
+    });
+    setBusy(false);
+  }, [runUserActivity, pushLog, refresh]);
+
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!catalogReady) return;
@@ -590,7 +615,8 @@ export function useStudio() {
     setBusy(true);
     await runUserActivity("Save settings", async () => {
       await patchSettings({
-        project_dir: projectDir || undefined,
+        ...(projectDirMode === "manual" && projectDir ? { project_dir: projectDir } : {}),
+        project_dir_mode: projectDirMode,
         default_platform: platformRef.current,
         platform_mode: platformMode,
         extra_install_platforms: [...extraInstallPlatforms],
@@ -867,11 +893,15 @@ export function useStudio() {
     selectedIds,
     projectDir,
     setProjectDir,
+    projectDirMode,
+    setProjectDirMode,
     platforms,
     platform,
     platformMode,
+    setPlatformMode,
     setPlatform,
     autoDetectPlatform,
+    autoDetectProject,
     extraInstallPlatforms,
     setExtraInstallPlatforms,
     compatiblePlatformsForSelection,

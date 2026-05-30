@@ -12,14 +12,14 @@ type Props = {
 };
 
 export function DomainsPage({ studio, onOpenDomain }: Props) {
-  const { discoveryPanelProfessions, assets, dbStats } = studio;
+  const { discoveryProfessions, assets, dbStats } = studio;
 
   const domains = useMemo(() => {
-    return discoveryPanelProfessions.map((p) => {
+    return discoveryProfessions.map((p) => {
       const count = assets.filter((a) => assetInDomain(a, p.domain)).length;
       return { profession: p, count, view: domainViewForProfession(p) };
     });
-  }, [discoveryPanelProfessions, assets]);
+  }, [discoveryProfessions, assets]);
 
   const totalAssets = dbStats?.asset_count ?? assets.length;
 

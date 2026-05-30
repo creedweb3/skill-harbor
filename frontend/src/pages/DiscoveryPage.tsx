@@ -13,12 +13,14 @@ import {
 import { AssetRankCard } from "../components/dashboard/AssetRankCard";
 import { RepoTrendCard } from "../components/dashboard/RepoTrendCard";
 import { HarborEmpty } from "../components/ui/HarborEmpty";
+import { DiscoveryPulse } from "../components/discover/DiscoveryPulse";
 import { PanelFooter } from "../components/discover/PanelFooter";
 import { SectionBar } from "../components/discover/SectionBar";
 import { TrendPeriodSwitch } from "../components/discover/TrendPeriodSwitch";
 import { SelectionPill } from "../components/ui/SelectionPill";
 import { TextAction } from "../components/ui/TextAction";
 import { clearDomainHash } from "../lib/domainHash";
+import { buildDiscoveryPulse } from "../lib/discoveryPulse";
 import {
   assetIdsForRepo,
   assetIdsForRepos,
@@ -58,7 +60,6 @@ export function DiscoveryPage({
     selectedIds,
     toggleRow,
     toggleSelectAllForIds,
-    dbStats,
   } = studio;
 
   const lim = discoveryLimits(discoveryUi);
@@ -109,6 +110,8 @@ export function DiscoveryPage({
     visibleRepoAssetIds.length > 0 &&
     visibleRepoAssetIds.every((id) => selectedIds.has(id));
 
+  const pulseStats = useMemo(() => buildDiscoveryPulse(assets), [assets]);
+
   if (sectionView) {
     if (sectionView.kind === "repos") {
       return (
@@ -151,20 +154,16 @@ export function DiscoveryPage({
 
   return (
     <div className="harbor-page discovery-page">
-      <section className="harbor-kpi-strip">
-        <div className="harbor-kpi">
-          <strong>{dbStats?.asset_count ?? assets.length}</strong>
-          <span>Registry assets</span>
-        </div>
-        <div className="harbor-kpi">
-          <strong>{dbStats?.synced_content_count ?? 0}</strong>
-          <span>With full content</span>
-        </div>
-        <div className="harbor-kpi">
-          <strong>{selectedIds.size}</strong>
-          <span>Selected to install</span>
-        </div>
-      </section>
+      {assets.length > 0 ? (
+        <DiscoveryPulse
+          stats={pulseStats}
+          onOpenLeader={
+            pulseStats.monthLeader
+              ? () => openRepo(pulseStats.monthLeader!.source_repo)
+              : undefined
+          }
+        />
+      ) : null}
 
       {trending && assets.length > 0 ? (
         <section className="discovery-section">
