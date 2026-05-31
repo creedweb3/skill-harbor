@@ -2301,8 +2301,9 @@ body {
 .section-bar--sticky {
   position: sticky;
   top: 0;
-  z-index: 4;
+  z-index: 20;
   padding: 0.55rem 0;
+  overflow: visible;
 }
 
 .section-bar__start {
@@ -2312,6 +2313,7 @@ body {
   gap: 0.65rem 0.85rem;
   flex: 0 1 auto;
   min-width: 0;
+  overflow: visible;
 }
 
 .section-bar__end {
@@ -2387,6 +2389,14 @@ body {
   width: auto;
   min-width: auto;
   flex-shrink: 0;
+}
+
+.section-bar .multi-select--open {
+  z-index: 60;
+}
+
+.multi-select__menu--fixed {
+  z-index: 100;
 }
 
 .section-bar .multi-select.section-bar__sort .multi-select__trigger {

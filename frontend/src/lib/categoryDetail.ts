@@ -2,10 +2,17 @@ import type { Asset, DiscoveryProfession } from "../api";
 import type { TrendPeriod } from "../hooks/useStudio";
 import type { InstalledRow } from "./installedGroups";
 import {
+  assetDisplayTitle,
   assetQualityScore,
   buildRepoTrends,
   compareAssets,
+  compareSkillsWithinRepo,
+  interleaveAssetsByRepoOrder,
+  repoLatestPushMs,
+  repoMaxStars,
   repoShortName,
+  sortAssetsByRepoOrder,
+  type BuildRepoTrendsOpts,
 } from "./ranking";
 
 export type DiscoverySectionKind = "trending" | "for_you" | "profession" | "repos";
@@ -23,7 +30,7 @@ export function domainViewForProfession(p: DiscoveryProfession): DiscoverySectio
     kind: "profession",
     id: `profession-${p.domain}`,
     label: p.label,
-    description: `All skills ranked in ${p.label}.`,
+    description: `All skills in ${p.label}. Sort by repo stars (popular first), push date, or name.`,
     domain: p.domain,
   };
 }
@@ -38,6 +45,7 @@ export function reposListView(): DiscoverySectionView {
 }
 
 export type CategorySortKey =
+  | "trend"
   | "rank"
   | "stars"
   | "votes"
@@ -45,14 +53,64 @@ export type CategorySortKey =
   | "name"
   | "recent";
 
+/** Domain / For You — flat skill sorts (distinct from trending interleave). */
 export const CATEGORY_SORT_OPTIONS: { value: CategorySortKey; label: string }[] = [
-  { value: "rank", label: "Rank score" },
   { value: "stars", label: "GitHub stars" },
-  { value: "votes", label: "Community votes" },
-  { value: "quality", label: "Quality score" },
-  { value: "recent", label: "Recently updated repos" },
+  { value: "recent", label: "Recently pushed" },
   { value: "name", label: "Name A–Z" },
 ];
+
+export function categorySortOptions(kind: DiscoverySectionKind) {
+  if (kind === "trending" || kind === "repos") return [];
+  return CATEGORY_SORT_OPTIONS;
+}
+
+export const TREND_PERIOD_LABEL: Record<TrendPeriod, string> = {
+  day: "Last 24 hours",
+  week: "Last 7 days",
+  month: "Last 30 days",
+  year: "Last year",
+  all: "All time",
+};
+
+export type SortCategoryOptions = {
+  trendPeriod?: TrendPeriod;
+  /** Full catalog for repo-level trend scores (defaults to `list`). */
+  trendCatalog?: Asset[];
+  trendOpts?: BuildRepoTrendsOpts;
+};
+
+/**
+ * Skills ranked for the trending catalog view: repos follow the same trend order as
+ * Discovery home, but skills are interleaved (best skill per repo, round-robin) so
+ * period changes are visible on page 1 instead of one mega-repo filling the grid.
+ */
+export function assetsInTrendOrder(assets: Asset[], trendPeriod: TrendPeriod): Asset[] {
+  if (!assets.length) return [];
+  const trends = buildRepoTrends(assets, trendPeriod, assets.length);
+  if (!trends.length) return [];
+
+  const byRepo = new Map<string, Asset[]>();
+  for (const asset of assets) {
+    const list = byRepo.get(asset.source_repo) ?? [];
+    list.push(asset);
+    byRepo.set(asset.source_repo, list);
+  }
+
+  const repoOrder = trends.map((t) => t.source_repo);
+  const interleaved = interleaveAssetsByRepoOrder(repoOrder, byRepo);
+  const seen = new Set(interleaved.map((a) => a.id));
+
+  // Repos without trend scores (edge case) append in star order at the end.
+  const tail: Asset[] = [];
+  for (const asset of assets) {
+    if (seen.has(asset.id)) continue;
+    tail.push(asset);
+  }
+  tail.sort(compareAssets);
+
+  return [...interleaved, ...tail];
+}
 
 export function assetInDomain(asset: Asset, domain: string): boolean {
   const primary = asset.primary_domain ?? (asset.domains ?? asset.categories)[0];
@@ -111,32 +169,41 @@ export function assetsForSectionView(
   }
 
   if (view.kind === "trending") {
-    const trends = buildRepoTrends(assets, trendPeriod, assets.length);
-    const reps = trends.map((t) => t.representative);
-    const seen = new Set<string>();
-    const out: Asset[] = [];
-    for (const asset of reps) {
-      if (seen.has(asset.id)) continue;
-      seen.add(asset.id);
-      out.push(asset);
-    }
-    for (const asset of assets) {
-      if (seen.has(asset.id)) continue;
-      seen.add(asset.id);
-      out.push(asset);
-    }
-    return out;
+    return assetsInTrendOrder(assets, trendPeriod);
   }
 
   return assets;
 }
 
-export function sortCategoryAssets(list: Asset[], sort: CategorySortKey): Asset[] {
+export function sortCategoryAssets(
+  list: Asset[],
+  sort: CategorySortKey,
+  opts?: SortCategoryOptions
+): Asset[] {
   const sorted = [...list];
   switch (sort) {
-    case "stars":
-      sorted.sort((a, b) => b.stars - a.stars || a.install_name.localeCompare(b.install_name));
+    case "trend": {
+      const catalog = opts?.trendCatalog ?? list;
+      const period = opts?.trendPeriod ?? "week";
+      const scores = new Map(
+        buildRepoTrends(catalog, period, catalog.length, opts?.trendOpts).map((t) => [
+          t.source_repo,
+          t.trendScore,
+        ])
+      );
+      sorted.sort((a, b) => {
+        const scoreA = scores.get(a.source_repo) ?? 0;
+        const scoreB = scores.get(b.source_repo) ?? 0;
+        return scoreB - scoreA || compareAssets(a, b);
+      });
       break;
+    }
+    case "stars":
+      return sortAssetsByRepoOrder(list, (ra, rb, byRepo) => {
+        const sa = repoMaxStars(byRepo.get(ra) ?? []);
+        const sb = repoMaxStars(byRepo.get(rb) ?? []);
+        return sb - sa || ra.localeCompare(rb);
+      });
     case "votes":
       sorted.sort(
         (a, b) =>
@@ -154,27 +221,38 @@ export function sortCategoryAssets(list: Asset[], sort: CategorySortKey): Asset[
       );
       break;
     case "name":
-      sorted.sort((a, b) => a.install_name.localeCompare(b.install_name));
+      sorted.sort((a, b) =>
+        assetDisplayTitle(a).localeCompare(assetDisplayTitle(b))
+      );
       break;
     case "recent":
-      sorted.sort((a, b) => {
-        const ta = a.repo_pushed_at ? Date.parse(a.repo_pushed_at) : 0;
-        const tb = b.repo_pushed_at ? Date.parse(b.repo_pushed_at) : 0;
-        return tb - ta || b.stars - a.stars || a.install_name.localeCompare(b.install_name);
+      return sortAssetsByRepoOrder(list, (ra, rb, byRepo) => {
+        const pa = repoLatestPushMs(byRepo.get(ra) ?? []);
+        const pb = repoLatestPushMs(byRepo.get(rb) ?? []);
+        if (pa !== pb) {
+          if (!pa) return 1;
+          if (!pb) return -1;
+          return pb - pa;
+        }
+        // Never fall back to star rank — use repo name so this differs from GitHub stars.
+        return ra.localeCompare(rb);
       });
-      break;
     case "rank":
     default:
-      sorted.sort(compareAssets);
+      sorted.sort((a, b) => {
+        const rankA = a.curated_rank ?? 99;
+        const rankB = b.curated_rank ?? 99;
+        if (rankA !== rankB) return rankA - rankB;
+        return compareAssets(a, b);
+      });
       break;
   }
   return sorted;
 }
 
 export function defaultSortForSection(kind: DiscoverySectionKind): CategorySortKey {
-  if (kind === "for_you") return "quality";
-  if (kind === "trending" || kind === "repos") return "stars";
-  return "rank";
+  if (kind === "trending") return "trend";
+  return "stars";
 }
 
 type ChartItem = { label: string; value: number };
@@ -252,7 +330,7 @@ export function sectionViewFromSection(
       id: section.id,
       label: "All ranked skills & rules",
       description:
-        "Browse the full catalog — sort by stars, votes, quality, or recency. Repos have their own page.",
+        "One top skill per trending repo on each page — period tabs reorder repos (same as GitHub Trending). Within a repo, skills sort by votes and quality.",
     };
   }
   if (section.kind === "for_you") {
@@ -268,7 +346,7 @@ export function sectionViewFromSection(
       kind: "profession",
       id: section.id,
       label: section.label,
-      description: `All skills ranked in ${section.label}.`,
+      description: `All skills in ${section.label}, sorted by GitHub stars by default.`,
       domain: section.domain,
     };
   }

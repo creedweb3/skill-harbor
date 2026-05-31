@@ -11,9 +11,10 @@ import { TextAction } from "../components/ui/TextAction";
 import {
   assetsForSectionView,
   buildCategoryAnalytics,
-  CATEGORY_SORT_OPTIONS,
+  categorySortOptions,
   defaultSortForSection,
   sortCategoryAssets,
+  TREND_PERIOD_LABEL,
   type CategorySortKey,
   type DiscoverySectionView,
 } from "../lib/categoryDetail";
@@ -48,13 +49,17 @@ export function DiscoverySectionPage({
     toggleSelectAllForIds,
   } = studio;
 
+  const isTrending = view.kind === "trending";
+  const sortOptions = useMemo(() => categorySortOptions(view.kind), [view.kind]);
+  const showSortDropdown = sortOptions.length > 0;
+
   const [sortBy, setSortBy] = useState<CategorySortKey>(() => defaultSortForSection(view.kind));
   const [page, setPage] = useState(1);
 
   useEffect(() => {
     setSortBy(defaultSortForSection(view.kind));
     setPage(1);
-  }, [view]);
+  }, [view.id, view.kind, view.domain]);
 
   useEffect(() => {
     setPage(1);
@@ -65,7 +70,11 @@ export function DiscoverySectionPage({
     [view, assets, installedItems, trendPeriod]
   );
 
-  const sorted = useMemo(() => sortCategoryAssets(pool, sortBy), [pool, sortBy]);
+  // Trending list is already ordered by buildRepoTrends (same as Discovery home).
+  const sorted = useMemo(
+    () => (isTrending ? pool : sortCategoryAssets(pool, sortBy)),
+    [pool, isTrending, sortBy]
+  );
   const analytics = useMemo(() => buildCategoryAnalytics(pool), [pool]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
@@ -84,7 +93,11 @@ export function DiscoverySectionPage({
 
   useEffect(() => {
     document.querySelector(".discovery-section-page")?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [page, view]);
+  }, [page, view, trendPeriod, sortBy]);
+
+  const rankMeta = isTrending
+    ? `Mixed by repo trend · ${TREND_PERIOD_LABEL[trendPeriod]}`
+    : (sortOptions.find((o) => o.value === sortBy)?.label ?? sortBy);
 
   const badge =
     view.kind === "trending"
@@ -138,19 +151,21 @@ export function DiscoverySectionPage({
         sticky
         start={
           <>
-            <SingleSelectDropdown
-              className="section-bar__sort"
-              label="Sort"
-              options={CATEGORY_SORT_OPTIONS}
-              value={sortBy}
-              onChange={(v) => setSortBy(v as CategorySortKey)}
-              aria-label="Sort category assets"
-            />
-            {view.kind === "trending" ? (
+            {isTrending ? (
               <TrendPeriodSwitch
                 period={trendPeriod}
                 onChange={setTrendPeriod}
                 hasLiveData={hasCatalog}
+              />
+            ) : null}
+            {showSortDropdown ? (
+              <SingleSelectDropdown
+                className="section-bar__sort"
+                label="Sort"
+                options={sortOptions}
+                value={sortBy}
+                onChange={(v) => setSortBy(v as CategorySortKey)}
+                aria-label="Sort category assets"
               />
             ) : null}
             <SelectionPill
@@ -164,8 +179,10 @@ export function DiscoverySectionPage({
         }
         meta={
           sorted.length === 0
-            ? "0 assets"
-            : `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${sorted.length.toLocaleString()}`
+            ? isTrending
+              ? `No repos active · ${rankMeta}`
+              : "0 assets"
+            : `${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${sorted.length.toLocaleString()} · ${rankMeta}`
         }
       />
 
@@ -185,8 +202,12 @@ export function DiscoverySectionPage({
 
       {sorted.length === 0 ? (
         <HarborEmpty
-          title="No assets in this domain"
-          description="Run Sync registry from the top bar, or check back after the next crawl."
+          title={isTrending ? "No skills to show yet" : "No assets in this domain"}
+          description={
+            isTrending
+              ? "Sync content from the top bar to load the catalog and GitHub push dates."
+              : "Run Sync content from the top bar, or check back after the next crawl."
+          }
         />
       ) : null}
 

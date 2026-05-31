@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { MultiSelectOption } from "./MultiSelectDropdown";
 
 type Props = {
@@ -47,7 +47,35 @@ export function SingleSelectDropdown({
   "aria-label": ariaLabel,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    setMenuStyle({
+      position: "fixed",
+      top: rect.bottom + 6,
+      left: rect.left,
+      minWidth: Math.max(rect.width, 188),
+      width: "max-content",
+      right: "auto",
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    const onLayout = () => updateMenuPosition();
+    window.addEventListener("scroll", onLayout, true);
+    window.addEventListener("resize", onLayout);
+    return () => {
+      window.removeEventListener("scroll", onLayout, true);
+      window.removeEventListener("resize", onLayout);
+    };
+  }, [open, updateMenuPosition]);
 
   useEffect(() => {
     if (!open) return;
@@ -57,10 +85,13 @@ export function SingleSelectDropdown({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDoc);
+    const timer = window.setTimeout(() => {
+      document.addEventListener("click", onDoc, true);
+    }, 0);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      window.clearTimeout(timer);
+      document.removeEventListener("click", onDoc, true);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -73,9 +104,13 @@ export function SingleSelectDropdown({
       ref={rootRef}
     >
       <button
+        ref={triggerRef}
         type="button"
         className="multi-select__trigger"
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={ariaLabel ?? label}
@@ -91,7 +126,11 @@ export function SingleSelectDropdown({
         </span>
       </button>
       {open ? (
-        <div className="multi-select__menu" role="presentation">
+        <div
+          className="multi-select__menu multi-select__menu--fixed"
+          style={menuStyle}
+          role="presentation"
+        >
           <div
             className="multi-select__options harbor-scroll harbor-scroll--inset"
             role="listbox"
@@ -106,7 +145,8 @@ export function SingleSelectDropdown({
                   role="option"
                   aria-selected={checked}
                   className={`multi-select__option${checked ? " is-checked" : ""}`}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     onChange(opt.value);
                     setOpen(false);
                   }}

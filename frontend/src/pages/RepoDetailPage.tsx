@@ -35,7 +35,7 @@ export function RepoDetailPage({ studio }: Props) {
     toggleSelectAllForIds,
   } = studio;
 
-  const [sortBy, setSortBy] = useState<CategorySortKey>("rank");
+  const [sortBy, setSortBy] = useState<CategorySortKey>("stars");
   const [page, setPage] = useState(1);
 
   const sourceRepo = selectedRepo ?? "";
@@ -78,7 +78,7 @@ export function RepoDetailPage({ studio }: Props) {
   const accentHue = repoAccentHue(sourceRepo);
 
   useEffect(() => {
-    setSortBy("rank");
+    setSortBy("stars");
     setPage(1);
   }, [sourceRepo]);
 

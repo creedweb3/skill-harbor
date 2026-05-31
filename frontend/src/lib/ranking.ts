@@ -31,6 +31,99 @@ export function compareAssets(a: Asset, b: Asset): number {
   return a.install_name.localeCompare(b.install_name);
 }
 
+/** Within one repo — stars tie, so use votes, Harbor score, curation, depth. */
+export function compareSkillsWithinRepo(a: Asset, b: Asset): number {
+  const voteA = a.vote_score ?? 0;
+  const voteB = b.vote_score ?? 0;
+  if (voteB !== voteA) return voteB - voteA;
+  if (b.score !== a.score) return b.score - a.score;
+  const rankA = a.curated_rank ?? 99;
+  const rankB = b.curated_rank ?? 99;
+  if (rankA !== rankB) return rankA - rankB;
+  const depthA = a.content_preview?.length ?? 0;
+  const depthB = b.content_preview?.length ?? 0;
+  if (depthB !== depthA) return depthB - depthA;
+  const typeRank = (t: string) => (t === "skill" ? 0 : t === "rule" ? 1 : 2);
+  const typeCmp = typeRank(a.asset_type) - typeRank(b.asset_type);
+  if (typeCmp !== 0) return typeCmp;
+  return a.install_name.localeCompare(b.install_name);
+}
+
+function groupAssetsBySourceRepo(assets: Asset[]): Map<string, Asset[]> {
+  const byRepo = new Map<string, Asset[]>();
+  for (const asset of assets) {
+    const list = byRepo.get(asset.source_repo) ?? [];
+    list.push(asset);
+    byRepo.set(asset.source_repo, list);
+  }
+  return byRepo;
+}
+
+export function repoMaxStars(files: Asset[]): number {
+  if (!files.length) return 0;
+  return Math.max(...files.map((f) => f.stars));
+}
+
+export function repoLatestPushMs(files: Asset[]): number {
+  let max = 0;
+  for (const file of files) {
+    const raw = file.repo_pushed_at?.trim();
+    if (!raw) continue;
+    const ts = Date.parse(raw);
+    if (!Number.isNaN(ts)) max = Math.max(max, ts);
+  }
+  return max;
+}
+
+/**
+ * Order repos with `repoCompare`, interleave best skill per repo (round-robin).
+ * Single-repo lists sort by skill-level merit instead of flat repo stars.
+ */
+export function sortAssetsByRepoOrder(
+  assets: Asset[],
+  repoCompare: (ra: string, rb: string, byRepo: Map<string, Asset[]>) => number
+): Asset[] {
+  if (!assets.length) return [];
+  const byRepo = groupAssetsBySourceRepo(assets);
+  if (byRepo.size <= 1) {
+    return [...assets].sort(compareSkillsWithinRepo);
+  }
+  const repoOrder = [...byRepo.keys()].sort(
+    (ra, rb) => repoCompare(ra, rb, byRepo) || ra.localeCompare(rb)
+  );
+  return interleaveAssetsByRepoOrder(repoOrder, byRepo);
+}
+
+/**
+ * Round-robin skills across repos in trend order — one top skill per repo per pass.
+ * Prevents a mega-repo from filling page 1 when repos reorder by period.
+ */
+export function interleaveAssetsByRepoOrder(
+  repoOrder: string[],
+  byRepo: Map<string, Asset[]>,
+  compareWithin: (a: Asset, b: Asset) => number = compareSkillsWithinRepo
+): Asset[] {
+  if (!repoOrder.length) return [];
+
+  for (const repo of repoOrder) {
+    const list = byRepo.get(repo);
+    if (list?.length) byRepo.set(repo, [...list].sort(compareWithin));
+  }
+
+  const out: Asset[] = [];
+  for (let round = 0; ; round++) {
+    let added = false;
+    for (const repo of repoOrder) {
+      const asset = byRepo.get(repo)?.[round];
+      if (!asset) continue;
+      out.push(asset);
+      added = true;
+    }
+    if (!added) break;
+  }
+  return out;
+}
+
 /** Prefer skills over rules when stars tie (For You). */
 export function compareAssetsForYou(a: Asset, b: Asset): number {
   const typeRank = (t: string) => (t === "skill" ? 0 : t === "command" ? 1 : t === "agent" ? 2 : 3);
@@ -111,19 +204,36 @@ export function repoAccentHue(sourceRepo: string): number {
   return Math.abs(hash) % 360;
 }
 
-function assetInPeriod(asset: Asset, period: TrendPeriod, now: number): boolean {
+function assetInPeriod(
+  asset: Asset,
+  period: TrendPeriod,
+  now: number,
+  strictDates = false
+): boolean {
   if (period === "all") return true;
   const raw = asset.repo_pushed_at?.trim();
-  if (!raw) return true;
+  if (!raw) return !strictDates;
   const pushed = Date.parse(raw);
-  if (Number.isNaN(pushed)) return true;
+  if (Number.isNaN(pushed)) return !strictDates;
   return now - pushed <= PERIOD_MS[period];
 }
 
-function groupAssetsByRepo(assets: Asset[], period: TrendPeriod, now: number): Map<string, Asset[]> {
+export type BuildRepoTrendsOpts = {
+  /** Do not fall back to all-time when the period window matches nothing. */
+  strictPeriod?: boolean;
+  /** Exclude assets/repos with missing push dates from short windows. */
+  strictDates?: boolean;
+};
+
+function groupAssetsByRepo(
+  assets: Asset[],
+  period: TrendPeriod,
+  now: number,
+  strictDates = false
+): Map<string, Asset[]> {
   const byRepo = new Map<string, Asset[]>();
   for (const asset of assets) {
-    if (!assetInPeriod(asset, period, now) && period !== "all") continue;
+    if (!assetInPeriod(asset, period, now, strictDates) && period !== "all") continue;
     const list = byRepo.get(asset.source_repo) ?? [];
     list.push(asset);
     byRepo.set(asset.source_repo, list);
@@ -209,16 +319,18 @@ export type RepoTrend = {
 export function buildRepoTrends(
   assets: Asset[],
   period: TrendPeriod,
-  limit: number
+  limit: number,
+  opts?: BuildRepoTrendsOpts
 ): RepoTrend[] {
   if (!assets.length) return [];
 
+  const strictDates = opts?.strictDates ?? false;
   const now = Date.now();
-  let byRepo = groupAssetsByRepo(assets, period, now);
+  let byRepo = groupAssetsByRepo(assets, period, now, strictDates);
 
-  // Strict period window empty (no recent pushes) — fall back to full catalog, still trend-scored
-  if (byRepo.size === 0 && period !== "all") {
-    byRepo = groupAssetsByRepo(assets, "all", now);
+  // Lenient mode: empty short window → fall back to all-time scoring (Discovery home strip)
+  if (!opts?.strictPeriod && byRepo.size === 0 && period !== "all") {
+    byRepo = groupAssetsByRepo(assets, "all", now, false);
   }
 
   if (byRepo.size === 0) return [];
